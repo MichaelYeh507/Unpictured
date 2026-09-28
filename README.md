@@ -22,3 +22,16 @@ npm run check    # every check that CI runs
 ```
 
 Generated worlds, photos and API keys are never committed.
+
+## Generate a world
+
+Put a World Labs API key in a file outside the repo (one line, `WLT_API_KEY=...`), then from `pipeline/`:
+
+```
+uv run --env-file <key file> unpictured credits                    # balance, free
+uv run --env-file <key file> unpictured generate photo.jpg         # dry run: shows the price
+uv run --env-file <key file> unpictured generate photo.jpg --yes   # spends credits
+```
+
+`generate` defaults to the cheap draft model, logs every paid call to `worlds/cost_log.jsonl`
+and refuses to pass a daily cap (`UNPICTURED_DAILY_CAP_USD`, default $3). Packages land in `worlds/`.
