@@ -1,0 +1,20 @@
+# Dependencies and build output
+node_modules/
+dist/
+*.tsbuildinfo
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Secrets such as the World Labs API key
+.env
+.env.*
+
+# Generated world packages: large, and built from personal photos
+worlds/
+
+# OS files
+.DS_Store
+Thumbs.db

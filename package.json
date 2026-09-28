@@ -1,0 +1,20 @@
+{
+  "name": "unpictured",
+  "private": true,
+  "workspaces": [
+    "web"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace web",
+    "build": "npm run build --workspace web",
+    "typecheck": "npm run typecheck --workspace web",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "check:web": "npm run lint && npm run typecheck && npm run build",
+    "check:pipeline": "uv run --locked --directory pipeline ruff check && uv run --locked --directory pipeline ruff format --check && uv run --locked --directory pipeline pytest",
+    "check": "npm run check:web && npm run check:pipeline"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14"
+  }
+}

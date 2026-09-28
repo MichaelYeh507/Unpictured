@@ -1,0 +1,31 @@
+[project]
+name = "unpictured-pipeline"
+version = "0.1.0"
+description = "Tools that generate and prepare Unpictured world packages."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+unpictured = "unpictured_pipeline.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.16.9",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle, import order, bugbear, pyupgrade
+select = ["F", "E", "W", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+# -ra prints the reason for every skipped, failed or errored test
+addopts = "-ra"
+testpaths = ["tests"]
