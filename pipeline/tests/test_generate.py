@@ -55,6 +55,8 @@ def test_generate_writes_package_and_logs_cost(fake_api, photo, tmp_path):
 
     meta = json.loads((package / "meta.json").read_text(encoding="utf-8"))
     assert meta["world_id"] == "world-1"
+    assert meta["display_name"] == "kitchen-photo-draft"
+    assert meta["model"] == "marble-1.0-draft"
     assert meta["seed"] == request["seed"]
     assert meta["frame"] == "marble_raw_opencv"
     assert meta["metric_scale_factor"] == 1.5
@@ -63,6 +65,32 @@ def test_generate_writes_package_and_logs_cost(fake_api, photo, tmp_path):
 
     events = [(entry["event"], entry["credits"]) for entry in read_cost_log(worlds)]
     assert events == [("started", 230), ("settled", 230)]
+
+
+def test_world_without_semantics_metadata_gets_null_scale_and_offset(fake_api, photo, tmp_path):
+    fake_api.semantics = None  # what a real draft world returned
+    worlds = tmp_path / "worlds"
+
+    assert main(["generate", str(photo), "--worlds-dir", str(worlds), "--yes"]) == 0
+
+    meta = json.loads((worlds / "kitchen-photo-draft" / "meta.json").read_text(encoding="utf-8"))
+    assert meta["metric_scale_factor"] is None
+    assert meta["ground_plane_offset"] is None
+
+
+def test_download_failure_after_billing_prints_the_free_fetch_command(
+    fake_api, photo, tmp_path, capsys
+):
+    fake_api.fail_downloads = True
+    worlds = tmp_path / "worlds"
+
+    assert main(["generate", str(photo), "--worlds-dir", str(worlds), "--yes"]) == 1
+
+    error = capsys.readouterr().err
+    assert "HTTP 503" in error
+    assert "fetch --world world-1 --name kitchen-photo-draft --photo" in error
+    assert not (worlds / "kitchen-photo-draft").exists()
+    assert [entry["event"] for entry in read_cost_log(worlds)] == ["started", "settled"]
 
 
 def test_uploads_an_upright_copy_without_metadata(fake_api, photo, tmp_path):
@@ -132,6 +160,32 @@ def test_fetch_downloads_an_existing_world_for_free(fake_api, tmp_path):
     assert fake_api.paths()[0] == "GET /marble/v1/worlds/world-1"
     assert "POST /marble/v1/worlds:generate" not in fake_api.paths()
     assert not (worlds / "cost_log.jsonl").exists()
+
+
+def test_fetch_by_operation_downloads_the_full_world(fake_api, tmp_path):
+    worlds = tmp_path / "worlds"
+    command = ["fetch", "--operation", "op-1", "--name", "kitchen", "--worlds-dir", str(worlds)]
+
+    assert main(command) == 0
+
+    package = worlds / "kitchen"
+    assert (package / "pano.png").exists()
+    meta = json.loads((package / "meta.json").read_text(encoding="utf-8"))
+    assert meta["model"] == "marble-1.0-draft"
+    assert meta["credits"] == 230
+
+
+def test_fetch_by_operation_logs_a_settled_cost_only_once(fake_api, photo, tmp_path):
+    worlds = tmp_path / "worlds"
+    assert main(["generate", str(photo), "--worlds-dir", str(worlds), "--yes"]) == 0
+    command = ["fetch", "--operation", "op-1", "--name", "again", "--worlds-dir", str(worlds)]
+
+    assert main(command) == 0
+
+    events = [entry["event"] for entry in read_cost_log(worlds)]
+    assert events == ["started", "settled"]
+    meta = json.loads((worlds / "again" / "meta.json").read_text(encoding="utf-8"))
+    assert meta["credits"] == 230
 
 
 def test_missing_api_key_is_reported_without_calling_the_api(fake_api, monkeypatch, capsys):

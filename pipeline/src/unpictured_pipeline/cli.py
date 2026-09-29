@@ -139,15 +139,26 @@ def run_generate(args: argparse.Namespace) -> int:
         )
         operation = wait_for_operation(client, operation_id)
         credits = record_settled_cost(cost_log, operation)
-        write_package(
-            operation["response"],
-            destination,
-            source_photo=upload,
-            operation_id=operation_id,
-            seed=seed,
-            credits=credits,
-        )
-    print_package_summary(destination, operation["response"], credits)
+        world_id = operation["response"]["world_id"]
+        try:
+            world = client.get_world(world_id)
+            write_package(
+                world,
+                destination,
+                source_photo=upload,
+                operation_id=operation_id,
+                seed=seed,
+                credits=credits,
+            )
+        except Exception:
+            print(
+                "The world was generated and billed. Download it again for free with: "
+                f"python -m unpictured_pipeline fetch --world {world_id} --name {name} "
+                f'--photo "{photo}"',
+                file=sys.stderr,
+            )
+            raise
+    print_package_summary(destination, world, credits)
     return 0
 
 
@@ -162,9 +173,10 @@ def run_fetch(args: argparse.Namespace) -> int:
     if args.operation:
         operation = wait_for_operation(client, args.operation)
         credits = record_settled_cost(CostLog(worlds_dir / "cost_log.jsonl"), operation)
-        world = operation["response"]
+        world_id = operation["response"]["world_id"]
     else:
-        world = client.get_world(args.world)
+        world_id = args.world
+    world = client.get_world(world_id)
     with tempfile.TemporaryDirectory() as temp_dir:
         clean_photo = prepare_upload(photo, Path(temp_dir)) if photo else None
         write_package(
@@ -242,6 +254,8 @@ def record_settled_cost(cost_log: CostLog, operation: dict) -> float | None:
     if not cost:
         return None
     credits = cost["total_credits"]
+    if cost_log.is_settled(operation["operation_id"]):
+        return credits
     cost_log.record(
         "settled",
         operation["operation_id"],

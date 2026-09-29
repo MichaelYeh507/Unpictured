@@ -1,6 +1,5 @@
-"""A local fake of the World API, built from the documented request and response shapes.
-
-It proves the code matches our reading of the docs, not that the docs match the real API.
+"""A local fake of the World API, built from the documented shapes and corrected where
+a real draft generation (2026-09-29) differed. Other models may still differ.
 """
 
 import json
@@ -21,6 +20,8 @@ class FakeWorldApi:
         self.generate_bodies: list[dict] = []
         self.uploads: dict[str, bytes] = {}
         self.fail_generation = False
+        self.fail_downloads = False
+        self.semantics: dict | None = {"metric_scale_factor": 1.5, "ground_plane_offset": 0.8}
         self._operation_polls = 0
 
     def paths(self) -> list[str]:
@@ -44,10 +45,17 @@ class FakeWorldApi:
                         "500k": f"{files}/500k.spz?signature=secret",
                         "100k": f"{files}/100k.spz?signature=secret",
                     },
-                    "semantics_metadata": {"metric_scale_factor": 1.5, "ground_plane_offset": 0.8},
+                    "semantics_metadata": self.semantics,
                 },
             },
         }
+
+    def operation_response(self) -> dict:
+        """The real operation returns only part of the world: no pano, model or name."""
+        world = self.world()
+        world.update(display_name="", model=None)
+        world["assets"]["imagery"]["pano_url"] = None
+        return world
 
     def route(self, method: str, path: str, body: bytes) -> tuple[int, bytes | dict]:
         if (method, path) == ("GET", "/marble/v1/credits"):
@@ -72,6 +80,8 @@ class FakeWorldApi:
         if (method, path) == ("GET", "/marble/v1/worlds/world-1"):
             return 200, self.world()
         if method == "GET" and path.startswith("/files/"):
+            if self.fail_downloads:
+                return 503, b"storage unavailable"
             return 200, b"fake " + path.removeprefix("/files/").encode()
         return 404, {"detail": "not found"}
 
@@ -84,7 +94,8 @@ class FakeWorldApi:
             error = {"code": 13, "message": "generation failed"}
             return {"operation_id": "op-1", "done": True, "error": error}
         cost = {"total_credits": 230, "line_items": [{"name": "Draft world", "credits": 230}]}
-        return {"operation_id": "op-1", "done": True, "response": self.world(), "cost": cost}
+        response = self.operation_response()
+        return {"operation_id": "op-1", "done": True, "response": response, "cost": cost}
 
 
 def make_handler(fake: FakeWorldApi) -> type[BaseHTTPRequestHandler]:

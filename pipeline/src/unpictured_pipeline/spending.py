@@ -60,6 +60,12 @@ class CostLog:
                 credits_by_operation[operation_id] = entry["credits"]
         return sum(credits_by_operation[operation_id] for operation_id in started_that_day)
 
+    def is_settled(self, operation_id: str) -> bool:
+        return any(
+            entry["event"] == "settled" and entry["operation_id"] == operation_id
+            for entry in self._entries()
+        )
+
     def _entries(self) -> list[dict]:
         if not self.path.exists():
             return []

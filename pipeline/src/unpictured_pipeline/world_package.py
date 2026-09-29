@@ -28,7 +28,8 @@ def write_package(
     if destination.exists():
         raise FileExistsError(f"{destination} already exists")
     assets = world["assets"]
-    semantics = assets["splats"]["semantics_metadata"]
+    # Draft worlds come back without semantics metadata, so scale and offset can be null.
+    semantics = assets["splats"].get("semantics_metadata") or {}
 
     staging = destination.with_name(destination.name + ".partial")
     if staging.exists():
@@ -69,8 +70,8 @@ def write_package(
         "world_marble_url": world.get("world_marble_url"),
         "caption": assets.get("caption"),
         "frame": "marble_raw_opencv",
-        "metric_scale_factor": semantics["metric_scale_factor"],
-        "ground_plane_offset": semantics["ground_plane_offset"],
+        "metric_scale_factor": semantics.get("metric_scale_factor"),
+        "ground_plane_offset": semantics.get("ground_plane_offset"),
         "files": files,
     }
     (staging / "meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")

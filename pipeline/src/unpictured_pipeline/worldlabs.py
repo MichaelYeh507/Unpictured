@@ -82,7 +82,7 @@ class WorldLabsClient:
 
 
 def download(url: str, destination: Path, timeout_seconds: float = 300) -> None:
-    """Downloads a signed asset URL. Asset hosts never receive the API key."""
+    """Downloads a world asset from its CDN URL. Asset hosts never receive the API key."""
     partial = destination.with_name(destination.name + ".part")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with _open(request, timeout_seconds) as response, partial.open("wb") as file:
@@ -107,6 +107,6 @@ def _open(request: urllib.request.Request, timeout_seconds: float):
 
 
 def _without_query(url: str) -> str:
-    # Signed upload and download URLs carry credentials in the query string.
+    # Signed upload URLs carry credentials in the query string.
     parts = urlsplit(url)
     return f"{parts.scheme}://{parts.netloc}{parts.path}"
