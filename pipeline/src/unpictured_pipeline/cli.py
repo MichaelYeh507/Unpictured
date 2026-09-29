@@ -1,15 +1,17 @@
-"""The `unpictured` command."""
+"""The command line, run as `python -m unpictured_pipeline`."""
 
 import argparse
 import os
 import random
 import re
 import sys
+import tempfile
 import time
 from datetime import datetime
 from importlib.metadata import version
 from pathlib import Path
 
+from unpictured_pipeline.photos import PhotoError, write_clean_copy
 from unpictured_pipeline.spending import (
     ESTIMATED_CREDITS_FROM_PHOTO,
     CostLog,
@@ -22,7 +24,7 @@ from unpictured_pipeline.worldlabs import API_BASE_URL, WorldLabsClient, WorldLa
 
 DEFAULT_MODEL = "marble-1.0-draft"
 DEFAULT_DAILY_CAP_USD = 3.0
-MAX_PHOTO_BYTES = 20_000_000
+MAX_UPLOAD_BYTES = 20_000_000
 PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 POLL_SECONDS = 5
 WAIT_TIMEOUT_SECONDS = 30 * 60
@@ -40,19 +42,21 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         return args.run(args)
-    except (UsageError, SpendingLimitError, WorldLabsError, FileExistsError) as error:
+    except (UsageError, PhotoError, SpendingLimitError, WorldLabsError, FileExistsError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="unpictured",
+        prog="python -m unpictured_pipeline",
         description="Generate and prepare Unpictured world packages. "
         "Commands that call the World API read the key from WLT_API_KEY.",
     )
     parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {version('unpictured-pipeline')}"
+        "--version",
+        action="version",
+        version=f"unpictured-pipeline {version('unpictured-pipeline')}",
     )
     commands = parser.add_subparsers(dest="command")
 
@@ -78,7 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--world", help="world ID")
     source.add_argument("--operation", help="operation ID printed by generate")
     fetch.add_argument("--name", required=True, help="package folder name")
-    fetch.add_argument("--photo", type=Path, help="source photo to copy into the package")
+    fetch.add_argument("--photo", type=Path, help="source photo to add to the package")
     fetch.add_argument("--worlds-dir", type=Path)
     fetch.set_defaults(run=run_fetch)
     return parser
@@ -106,38 +110,43 @@ def run_generate(args: argparse.Namespace) -> int:
     client = api_client()
     remaining = client.get_credits()
 
-    print(f"Photo:   {photo.name} ({photo.stat().st_size / 1_000_000:.1f} MB)")
-    print(
-        f"Model:   {args.model}, about {estimated_credits:,} credits "
-        f"(${credits_to_usd(estimated_credits):.2f})"
-    )
-    print(f"Balance: {remaining:,.0f} credits")
-    print(f"Today:   ${spent_usd:.2f} spent of the ${cap_usd:.2f} daily cap")
-    print(f"Package: {destination}")
-    if not args.yes:
-        print("Dry run: nothing was spent. Add --yes to generate.")
-        return 0
+    with tempfile.TemporaryDirectory() as temp_dir:
+        upload = prepare_upload(photo, Path(temp_dir))
+        print(
+            f"Photo:   {photo.name}, uploaded as a {upload.stat().st_size / 1e6:.1f} MB "
+            "JPEG with its metadata removed"
+        )
+        print(
+            f"Model:   {args.model}, about {estimated_credits:,} credits "
+            f"(${credits_to_usd(estimated_credits):.2f})"
+        )
+        print(f"Balance: {remaining:,.0f} credits")
+        print(f"Today:   ${spent_usd:.2f} spent of the ${cap_usd:.2f} daily cap")
+        print(f"Package: {destination}")
+        if not args.yes:
+            print("Dry run: nothing was spent. Add --yes to generate.")
+            return 0
 
-    check_daily_cap(cost_log, estimated_credits, cap_usd, today)
-    media_asset_id = client.upload_image(photo)
-    seed = random.randrange(2**31)
-    operation_id = start_generation_logged(
-        client, cost_log, media_asset_id, args.model, name, seed, estimated_credits
-    )
-    print(
-        f"Started operation {operation_id} (seed {seed}). "
-        "Drafts take about 20 seconds, standard worlds about 5 minutes."
-    )
-    operation = wait_for_operation(client, operation_id)
-    credits = record_settled_cost(cost_log, operation)
-    write_package(
-        operation["response"],
-        destination,
-        source_photo=photo,
-        operation_id=operation_id,
-        seed=seed,
-        credits=credits,
-    )
+        check_daily_cap(cost_log, estimated_credits, cap_usd, today)
+        media_asset_id = client.upload_image(upload)
+        seed = random.randrange(2**31)
+        operation_id = start_generation_logged(
+            client, cost_log, media_asset_id, args.model, name, seed, estimated_credits
+        )
+        print(
+            f"Started operation {operation_id} (seed {seed}). "
+            "Drafts take about 20 seconds, standard worlds about 5 minutes."
+        )
+        operation = wait_for_operation(client, operation_id)
+        credits = record_settled_cost(cost_log, operation)
+        write_package(
+            operation["response"],
+            destination,
+            source_photo=upload,
+            operation_id=operation_id,
+            seed=seed,
+            credits=credits,
+        )
     print_package_summary(destination, operation["response"], credits)
     return 0
 
@@ -156,11 +165,25 @@ def run_fetch(args: argparse.Namespace) -> int:
         world = operation["response"]
     else:
         world = client.get_world(args.world)
-    write_package(
-        world, destination, source_photo=photo, operation_id=args.operation, credits=credits
-    )
+    with tempfile.TemporaryDirectory() as temp_dir:
+        clean_photo = prepare_upload(photo, Path(temp_dir)) if photo else None
+        write_package(
+            world,
+            destination,
+            source_photo=clean_photo,
+            operation_id=args.operation,
+            credits=credits,
+        )
     print_package_summary(destination, world, credits)
     return 0
+
+
+def prepare_upload(photo: Path, temp_dir: Path) -> Path:
+    """The upload and the package's source photo are this cleaned copy, never the original."""
+    upload = write_clean_copy(photo, temp_dir / "source.jpg")
+    if upload.stat().st_size >= MAX_UPLOAD_BYTES:
+        raise UsageError(f"{photo.name} is still over the API's 20 MB limit as a JPEG")
+    return upload
 
 
 def start_generation_logged(
@@ -203,7 +226,7 @@ def wait_for_operation(client: WorldLabsClient, operation_id: str) -> dict:
         if time.monotonic() > deadline:
             raise WorldLabsError(
                 f"Still running after {WAIT_TIMEOUT_SECONDS // 60} minutes. Resume with: "
-                f"unpictured fetch --operation {operation_id} --name <name>"
+                f"python -m unpictured_pipeline fetch --operation {operation_id} --name <name>"
             )
         time.sleep(POLL_SECONDS)
     error = operation.get("error")
@@ -241,7 +264,8 @@ def api_client() -> WorldLabsClient:
     api_key = os.environ.get("WLT_API_KEY", "").strip()
     if not api_key:
         raise UsageError(
-            "WLT_API_KEY is not set. Run with: uv run --env-file <path to key file> unpictured ..."
+            "WLT_API_KEY is not set. Run with: "
+            "uv run --env-file <path to key file> python -m unpictured_pipeline ..."
         )
     base_url = os.environ.get("UNPICTURED_API_BASE_URL", API_BASE_URL)
     return WorldLabsClient(api_key, base_url)
@@ -259,9 +283,10 @@ def check_photo(photo: Path) -> Path:
     if not photo.is_file():
         raise UsageError(f"{photo} is not a file")
     if photo.suffix.lower() not in PHOTO_EXTENSIONS:
-        raise UsageError(f"{photo.name}: use one of {', '.join(sorted(PHOTO_EXTENSIONS))}")
-    if photo.stat().st_size >= MAX_PHOTO_BYTES:
-        raise UsageError(f"{photo.name} is over the API's 20 MB limit")
+        raise UsageError(
+            f"{photo.name}: use one of {', '.join(sorted(PHOTO_EXTENSIONS))} "
+            "(convert HEIC photos to JPG first)"
+        )
     return photo
 
 

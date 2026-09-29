@@ -1,4 +1,7 @@
+import io
 import json
+
+from PIL import Image
 
 from unpictured_pipeline.cli import main
 
@@ -39,8 +42,7 @@ def test_generate_writes_package_and_logs_cost(fake_api, photo, tmp_path):
     package = worlds / "kitchen-photo-draft"
     assert sorted(path.name for path in package.iterdir()) == PACKAGE_FILES
     assert (package / "splats.spz").read_bytes() == b"fake full.spz"
-    assert (package / "source.jpg").read_bytes() == photo.read_bytes()
-    assert fake_api.uploads["asset-1"] == photo.read_bytes()
+    assert (package / "source.jpg").read_bytes() == fake_api.uploads["asset-1"]
 
     request = fake_api.generate_bodies[0]
     assert request["model"] == "marble-1.0-draft"
@@ -61,6 +63,26 @@ def test_generate_writes_package_and_logs_cost(fake_api, photo, tmp_path):
 
     events = [(entry["event"], entry["credits"]) for entry in read_cost_log(worlds)]
     assert events == [("started", 230), ("settled", 230)]
+
+
+def test_uploads_an_upright_copy_without_metadata(fake_api, photo, tmp_path):
+    assert main(["generate", str(photo), "--worlds-dir", str(tmp_path / "w"), "--yes"]) == 0
+
+    with Image.open(io.BytesIO(fake_api.uploads["asset-1"])) as uploaded:
+        assert uploaded.format == "JPEG"
+        assert uploaded.size == (30, 40)  # the rotate-90 flag was applied to the pixels
+        assert len(uploaded.getexif()) == 0  # no GPS, no orientation, nothing
+        assert "comment" not in uploaded.info
+
+
+def test_heic_photo_is_refused_with_a_hint(fake_api, tmp_path, capsys):
+    heic = tmp_path / "IMG_0001.HEIC"
+    heic.write_bytes(b"not decodable here")
+
+    assert main(["generate", str(heic), "--worlds-dir", str(tmp_path / "w")]) == 1
+
+    assert "convert HEIC photos to JPG first" in capsys.readouterr().err
+    assert fake_api.requests == []
 
 
 def test_api_key_is_sent_only_to_the_api(fake_api, photo, tmp_path):

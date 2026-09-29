@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 import pytest
+from PIL import ExifTags, Image
 
 from unpictured_pipeline import cli
 
@@ -132,6 +133,14 @@ def fake_api(monkeypatch):
 
 @pytest.fixture
 def photo(tmp_path):
+    """A 40x30 JPEG like a phone's: GPS location, a rotate-90 flag and a comment."""
     path = tmp_path / "Kitchen Photo.jpg"
-    path.write_bytes(b"\xff\xd8 stand-in for a real JPEG")
+    exif = Image.Exif()
+    exif[ExifTags.Base.Orientation] = 6
+    gps = exif.get_ifd(ExifTags.IFD.GPSInfo)
+    gps[ExifTags.GPS.GPSLatitudeRef] = "N"
+    gps[ExifTags.GPS.GPSLatitude] = (40.0, 26.0, 46.0)
+    Image.new("RGB", (40, 30), "red").save(path, "JPEG", exif=exif, comment=b"home")
+    with Image.open(path) as saved:
+        assert saved.getexif().get_ifd(ExifTags.IFD.GPSInfo), "test photo must carry GPS"
     return path

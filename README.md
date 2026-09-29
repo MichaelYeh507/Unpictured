@@ -28,10 +28,11 @@ Generated worlds, photos and API keys are never committed.
 Put a World Labs API key in a file outside the repo (one line, `WLT_API_KEY=...`), then from `pipeline/`:
 
 ```
-uv run --env-file <key file> unpictured credits                    # balance, free
-uv run --env-file <key file> unpictured generate photo.jpg         # dry run: shows the price
-uv run --env-file <key file> unpictured generate photo.jpg --yes   # spends credits
+uv run --env-file <key file> python -m unpictured_pipeline credits                 # balance, free
+uv run --env-file <key file> python -m unpictured_pipeline generate photo.jpg      # dry run: price
+uv run --env-file <key file> python -m unpictured_pipeline generate photo.jpg --yes
 ```
 
 `generate` defaults to the cheap draft model, logs every paid call to `worlds/cost_log.jsonl`
-and refuses to pass a daily cap (`UNPICTURED_DAILY_CAP_USD`, default $3). Packages land in `worlds/`.
+and refuses to pass a daily cap (`UNPICTURED_DAILY_CAP_USD`, default $3). It uploads an upright
+JPEG copy with all metadata removed, since phone photos usually carry GPS. Packages land in `worlds/`.
