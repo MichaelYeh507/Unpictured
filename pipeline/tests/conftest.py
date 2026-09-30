@@ -16,9 +16,12 @@ BROKEN_REPLIES = {
     "refused": (400, {"detail": "invalid request"}),
     "server error": (500, {"detail": "internal error"}),
     "unavailable": (503, {"detail": "unavailable"}),
+    "moved": (307, {"location": "http://localhost/elsewhere"}),
     "dropped": (None, b""),
     "not json": (200, b"<html>gateway page</html>"),
     "no operation id": (200, {"done": False}),
+    "not an object": (200, ["op-1"]),
+    "truncated": (200, b"only part of the file"),  # sent with a larger Content-Length
 }
 
 
@@ -136,10 +139,13 @@ def make_handler(fake: FakeWorldApi) -> type[BaseHTTPRequestHandler]:
                 self.close_connection = True
                 return
             data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+            declared_length = len(data)
+            if fake.broken.get(path) == "truncated":
+                declared_length += 100
             self.send_response(status)
             if 300 <= status < 400:
                 self.send_header("Location", payload["location"])
-            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Content-Length", str(declared_length))
             self.end_headers()
             self.wfile.write(data)
 

@@ -4,8 +4,9 @@ import json
 import pytest
 from PIL import Image
 
-from unpictured_pipeline import cli
+from unpictured_pipeline import cli, worldlabs
 from unpictured_pipeline.cli import main
+from unpictured_pipeline.worldlabs import WorldLabsClient
 
 GENERATE_PATH = "/marble/v1/worlds:generate"
 PACKAGE_FILES = [
@@ -125,7 +126,10 @@ def test_ctrl_c_while_waiting_prints_the_free_fetch_command(
     assert "fetch --operation op-1 --name kitchen-photo-draft" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("failure", ["server error", "dropped", "not json", "no operation id"])
+@pytest.mark.parametrize(
+    "failure",
+    ["server error", "moved", "dropped", "not json", "no operation id", "not an object"],
+)
 def test_start_without_a_clear_answer_is_logged_as_unconfirmed(
     fake_api, photo, tmp_path, capsys, failure
 ):
@@ -139,6 +143,21 @@ def test_start_without_a_clear_answer_is_logged_as_unconfirmed(
     assert entries == [("unconfirmed", 230)]
 
 
+def test_ctrl_c_during_the_start_is_logged_as_unconfirmed(
+    fake_api, photo, tmp_path, monkeypatch, capsys
+):
+    def press_ctrl_c(*_args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(WorldLabsClient, "start_generation", press_ctrl_c)
+    worlds = tmp_path / "worlds"
+
+    assert main(["generate", str(photo), "--worlds-dir", str(worlds), "--yes"]) == 130
+
+    assert "may have started anyway" in capsys.readouterr().err
+    assert [entry["event"] for entry in read_cost_log(worlds)] == ["unconfirmed"]
+
+
 def test_refused_start_is_not_logged(fake_api, photo, tmp_path, capsys):
     fake_api.broken[GENERATE_PATH] = "refused"
     worlds = tmp_path / "worlds"
@@ -150,11 +169,12 @@ def test_refused_start_is_not_logged(fake_api, photo, tmp_path, capsys):
 
 
 def test_invalid_name_is_refused_before_any_call(fake_api, photo, tmp_path, capsys):
-    command = ["generate", str(photo), "--name", "living room?", "--yes"]
+    worlds = ["--worlds-dir", str(tmp_path / "w")]
 
-    assert main([*command, "--worlds-dir", str(tmp_path / "w")]) == 1
+    assert main(["generate", str(photo), "--name", "living room?", "--yes", *worlds]) == 1
+    assert main(["fetch", "--world", "world-1", "--name", "Living-Room", *worlds]) == 1
 
-    assert "--name" in capsys.readouterr().err
+    assert capsys.readouterr().err.count("--name") == 2
     assert fake_api.requests == []
 
 
@@ -251,6 +271,29 @@ def test_broken_reply_is_a_clean_error(fake_api, tmp_path, capsys, reply, messag
     assert main([*command, "--worlds-dir", str(tmp_path / "w")]) == 1
 
     assert message in capsys.readouterr().err
+
+
+def test_truncated_download_is_an_error(fake_api, tmp_path, capsys):
+    fake_api.broken["/files/500k.spz"] = "truncated"
+    worlds = tmp_path / "worlds"
+    command = ["fetch", "--world", "world-1", "--name", "kitchen"]
+
+    assert main([*command, "--worlds-dir", str(worlds)]) == 1
+
+    assert "stopped after 21 of 121 bytes" in capsys.readouterr().err
+    assert not (worlds / "kitchen").exists()
+
+
+def test_download_dropped_mid_file_is_a_clean_error(fake_api, tmp_path, monkeypatch, capsys):
+    def drop_connection(*_args):
+        raise ConnectionResetError("connection reset by peer")
+
+    monkeypatch.setattr(worldlabs.shutil, "copyfileobj", drop_connection)
+    command = ["fetch", "--world", "world-1", "--name", "kitchen"]
+
+    assert main([*command, "--worlds-dir", str(tmp_path / "w")]) == 1
+
+    assert "connection reset by peer" in capsys.readouterr().err
 
 
 def test_fetch_by_operation_downloads_the_full_world(fake_api, tmp_path):

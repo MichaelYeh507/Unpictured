@@ -100,8 +100,18 @@ def download(url: str, destination: Path, timeout_seconds: float = 300) -> None:
     """Downloads a world asset from its CDN URL. Asset hosts never receive the API key."""
     partial = destination.with_name(destination.name + ".part")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    source = _without_query(url)
     with _open(request, timeout_seconds, _ASSET_OPENER) as response, partial.open("wb") as file:
-        shutil.copyfileobj(response, file)
+        try:
+            shutil.copyfileobj(response, file)
+        except (OSError, http.client.HTTPException) as error:
+            raise WorldLabsError(f"Download of {source} failed: {error}") from None
+        # urllib returns a short file without an error when the connection closes early.
+        expected = response.headers.get("Content-Length")
+        if expected is not None and file.tell() != int(expected):
+            raise WorldLabsError(
+                f"Download of {source} stopped after {file.tell():,} of {int(expected):,} bytes"
+            )
     partial.replace(destination)
 
 

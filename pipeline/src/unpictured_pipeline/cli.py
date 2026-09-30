@@ -148,10 +148,7 @@ def run_generate(args: argparse.Namespace) -> int:
         operation_id = start_generation_logged(
             client, cost_log, media_asset_id, args.model, name, seed, estimated_credits
         )
-        print(
-            f"Started operation {operation_id} (seed {seed}). "
-            "Drafts take about 20 seconds, standard worlds about 5 minutes."
-        )
+        print("Drafts take about 20 seconds, standard worlds about 5 minutes.")
         world_id = None
         try:
             operation = wait_for_operation(client, operation_id)
@@ -221,18 +218,26 @@ def start_generation_logged(
     estimated_credits: float,
 ) -> str:
     try:
-        operation_id = client.start_generation(media_asset_id, model, name, seed)["operation_id"]
-    except Exception as error:
+        reply = client.start_generation(media_asset_id, model, name, seed)
+        operation_id = reply.get("operation_id")
+        if not operation_id:
+            raise WorldLabsError("The reply has no operation ID.")
+    except BaseException as error:  # also Ctrl-C while the request is in flight
         # Only a 4xx reply means the start was refused. Anything else may have started it.
         if isinstance(error, WorldLabsError) and error.status and 400 <= error.status < 500:
             raise
         unknown_id = f"unconfirmed-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
         cost_log.record("unconfirmed", unknown_id, estimated_credits, model=model, name=name)
-        reason = error if isinstance(error, WorldLabsError) else f"Unexpected reply: {error!r}."
-        raise WorldLabsError(
-            f"{reason} The generation may have started anyway: check "
-            "https://platform.worldlabs.ai/usage before trying again."
-        ) from None
+        print(
+            "The generation may have started anyway: check "
+            "https://platform.worldlabs.ai/usage before trying again.",
+            file=sys.stderr,
+        )
+        if isinstance(error, Exception) and not isinstance(error, WorldLabsError):
+            raise WorldLabsError(f"Unexpected reply: {error!r}") from None
+        raise
+    # Shown before logging, so the ID is on screen even if the log write fails.
+    print(f"Started operation {operation_id} (seed {seed}).")
     cost_log.record("started", operation_id, estimated_credits, model=model, name=name, seed=seed)
     return operation_id
 
@@ -293,8 +298,6 @@ def print_fetch_hint(
         f"Do not run generate again: the world {state}. Download it for free with: {command}",
         file=sys.stderr,
     )
-    if not world_id:
-        print("Operations expire about 3 hours after they start.", file=sys.stderr)
 
 
 def print_package_summary(destination: Path, world: dict, credits: float | None) -> None:
