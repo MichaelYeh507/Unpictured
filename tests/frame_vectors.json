@@ -1,0 +1,59 @@
+{
+  "description": "Raw splat points (marble_raw_opencv: x right, y down, z forward) mapped into the game frame (three.js: x right, y up, -z forward). Worked out by hand. The TypeScript core checks against this file now; a port to another engine must pass the same file.",
+  "cases": [
+    {
+      "name": "metric world",
+      "meta": {
+        "frame": "marble_raw_opencv",
+        "metric_scale_factor": 2.0,
+        "ground_plane_offset": 0.9
+      },
+      "placement": {
+        "scale": 2.0,
+        "quaternion": [1, 0, 0, 0],
+        "position": [0, 0.9, 0],
+        "metric": true
+      },
+      "points": [
+        { "label": "source camera", "raw": [0, 0, 0], "game": [0, 0.9, 0] },
+        { "label": "floor below the camera", "raw": [0, 0.45, 0], "game": [0, 0, 0] },
+        { "label": "one raw unit ahead", "raw": [0, 0, 1], "game": [0, 0.9, -2] },
+        { "label": "right, above and behind", "raw": [1, -0.5, -2], "game": [2, 1.9, 4] }
+      ]
+    },
+    {
+      "name": "draft without metric data",
+      "meta": {
+        "frame": "marble_raw_opencv",
+        "metric_scale_factor": null,
+        "ground_plane_offset": null
+      },
+      "placement": {
+        "scale": 1,
+        "quaternion": [1, 0, 0, 0],
+        "position": [0, 1.6, 0],
+        "metric": false
+      },
+      "points": [
+        { "label": "source camera", "raw": [0, 0, 0], "game": [0, 1.6, 0] },
+        { "label": "one raw unit ahead", "raw": [0, 0, 1], "game": [0, 1.6, -1] },
+        { "label": "right, below and ahead", "raw": [1, 2, 3], "game": [1, -0.4, -3] }
+      ]
+    },
+    {
+      "name": "scale without a ground offset falls back like a draft",
+      "meta": {
+        "frame": "marble_raw_opencv",
+        "metric_scale_factor": 2.0,
+        "ground_plane_offset": null
+      },
+      "placement": {
+        "scale": 1,
+        "quaternion": [1, 0, 0, 0],
+        "position": [0, 1.6, 0],
+        "metric": false
+      },
+      "points": [{ "label": "one raw unit ahead", "raw": [0, 0, 1], "game": [0, 1.6, -1] }]
+    }
+  ]
+}

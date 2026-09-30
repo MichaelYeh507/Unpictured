@@ -7,12 +7,15 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
+    "@sparkjsdev/spark": "2.2.0",
+    "@unpictured/core": "0.0.0",
     "three": "0.186.1"
   },
   "devDependencies": {
+    "@types/node": "26.6.3",
     "@types/three": "0.186.0",
     "typescript": "7.0.2",
     "vite": "8.3.1"
