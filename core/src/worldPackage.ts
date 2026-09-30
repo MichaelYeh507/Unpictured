@@ -28,11 +28,15 @@ export function parseWorldMeta(json: unknown): WorldMeta {
     }
     checkedFiles[role] = fileName;
   }
+  const metricScaleFactor = numberOrNull(meta, "metric_scale_factor");
+  if (metricScaleFactor !== null && metricScaleFactor <= 0) {
+    throw new Error("meta.json: metric_scale_factor must be above 0");
+  }
   return {
     worldId: requireString(meta, "world_id"),
     frame: {
       frame: requireString(meta, "frame"),
-      metricScaleFactor: numberOrNull(meta, "metric_scale_factor"),
+      metricScaleFactor,
       groundPlaneOffset: numberOrNull(meta, "ground_plane_offset"),
     },
     files: checkedFiles,

@@ -35,6 +35,8 @@ test("reads metric data when present", () => {
 test.each([
   ["a missing frame", { frame: undefined }, "frame is missing"],
   ["a scale given as text", { metric_scale_factor: "1.5" }, "must be a number or null"],
+  ["a scale of zero", { metric_scale_factor: 0 }, "must be above 0"],
+  ["a negative scale", { metric_scale_factor: -1 }, "must be above 0"],
   ["a file path with a folder", { files: { splats_500k: "../secret.spz" } }, "not a plain file"],
   ["files that are not an object", { files: ["splats.spz"] }, "files is not an object"],
 ])("refuses %s", (_label, change, message) => {

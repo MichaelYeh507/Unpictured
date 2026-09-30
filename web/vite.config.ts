@@ -1,5 +1,6 @@
 import { createReadStream, statSync } from "node:fs";
 import path from "node:path";
+import { pipeline } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { type Connect, defineConfig, type Plugin } from "vite";
 import { parseWorldFilePath } from "../core/src/worldPackage.ts";
@@ -15,11 +16,11 @@ const CONTENT_TYPES: Record<string, string> = {
   ".glb": "model/gltf-binary",
 };
 
-/** Serves /worlds/<name>/<file>. Anything else under /worlds/ is a 404, never the app page. */
+/** Serves /worlds/<name>/<file>. Anything else starting /worlds is a 404, never the app page. */
 function serveWorlds(): Connect.NextHandleFunction {
   return (request, response, next) => {
     const urlPath = new URL(request.url ?? "/", "http://localhost").pathname;
-    if (!urlPath.startsWith("/worlds/")) {
+    if (!urlPath.toLowerCase().startsWith("/worlds")) {
       next();
       return;
     }
@@ -40,7 +41,13 @@ function serveWorlds(): Connect.NextHandleFunction {
       response.end();
       return;
     }
-    createReadStream(filePath).pipe(response);
+    // pipeline closes the file when the browser disconnects, and reports read errors.
+    pipeline(createReadStream(filePath), response, (error) => {
+      if (error && !response.headersSent) {
+        response.statusCode = 500;
+        response.end();
+      }
+    });
   };
 }
 

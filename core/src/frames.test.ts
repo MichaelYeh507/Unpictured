@@ -40,10 +40,10 @@ test("the source camera starts at the placement's position", () => {
   const placement = placeWorld({
     frame: "marble_raw_opencv",
     metricScaleFactor: 2,
-    groundPlaneOffset: 1.6,
+    groundPlaneOffset: 0.9,
   });
 
-  expectClose(sourceCameraPosition(placement), [0, 1.6, 0]);
+  expectClose(sourceCameraPosition(placement), [0, 0.9, 0]);
 });
 
 test("an unknown frame is refused", () => {
