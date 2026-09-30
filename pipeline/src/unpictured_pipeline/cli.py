@@ -322,8 +322,13 @@ def api_client() -> WorldLabsClient:
 
 def cost_log_path() -> Path:
     """One log per user, so every clone and --worlds-dir counts toward the same daily cap."""
-    override = os.environ.get("UNPICTURED_COST_LOG")
-    return Path(override) if override else Path.home() / ".unpictured" / "cost_log.jsonl"
+    override = os.environ.get("UNPICTURED_COST_LOG", "").strip()
+    if not override:
+        return Path.home() / ".unpictured" / "cost_log.jsonl"
+    path = Path(override).expanduser()
+    if not path.is_absolute():
+        raise UsageError(f"UNPICTURED_COST_LOG must be an absolute path, not {override!r}")
+    return path
 
 
 def daily_cap_usd() -> float:

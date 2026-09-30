@@ -26,13 +26,14 @@ def read_cost_log(path):
     return [json.loads(line) for line in lines]
 
 
-def test_dry_run_spends_nothing(fake_api, photo, tmp_path, capsys):
+def test_dry_run_spends_nothing(fake_api, photo, tmp_path, cost_log, capsys):
     worlds = tmp_path / "worlds"
 
     assert main(["generate", str(photo), "--worlds-dir", str(worlds)]) == 0
 
     output = capsys.readouterr().out
     assert "230 credits ($0.18)" in output
+    assert f"Log:     {cost_log}" in output
     assert "Dry run: nothing was spent" in output
     assert fake_api.paths() == ["GET /marble/v1/credits"]
     assert not worlds.exists()
@@ -250,6 +251,17 @@ def test_cost_log_defaults_to_the_home_folder(tmp_path, monkeypatch):
     monkeypatch.setenv("USERPROFILE", str(tmp_path))  # and on Windows
 
     assert cli.cost_log_path() == tmp_path / ".unpictured" / "cost_log.jsonl"
+
+    monkeypatch.setenv("UNPICTURED_COST_LOG", " ~/costs.jsonl ")
+    assert cli.cost_log_path() == tmp_path / "costs.jsonl"
+
+
+def test_relative_cost_log_is_refused(monkeypatch):
+    # A relative path would give each working folder its own daily total.
+    monkeypatch.setenv("UNPICTURED_COST_LOG", "costs.jsonl")
+
+    with pytest.raises(cli.UsageError, match="absolute path"):
+        cli.cost_log_path()
 
 
 def test_failed_generation_leaves_no_package(fake_api, photo, tmp_path, cost_log, capsys):
