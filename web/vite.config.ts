@@ -41,13 +41,9 @@ function serveWorlds(): Connect.NextHandleFunction {
       response.end();
       return;
     }
-    // pipeline closes the file when the browser disconnects, and reports read errors.
-    pipeline(createReadStream(filePath), response, (error) => {
-      if (error && !response.headersSent) {
-        response.statusCode = 500;
-        response.end();
-      }
-    });
+    // pipeline closes the file when the browser disconnects. On a read error it closes the
+    // connection too, and the viewer reports the failed load.
+    pipeline(createReadStream(filePath), response, () => {});
   };
 }
 
