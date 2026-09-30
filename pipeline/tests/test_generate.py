@@ -1,10 +1,13 @@
 import io
 import json
 
+import pytest
 from PIL import Image
 
+from unpictured_pipeline import cli
 from unpictured_pipeline.cli import main
 
+GENERATE_PATH = "/marble/v1/worlds:generate"
 PACKAGE_FILES = [
     "collider.glb",
     "meta.json",
@@ -88,9 +91,71 @@ def test_download_failure_after_billing_prints_the_free_fetch_command(
 
     error = capsys.readouterr().err
     assert "HTTP 503" in error
+    assert "secret" not in error  # signed URL queries stay out of messages
     assert "fetch --world world-1 --name kitchen-photo-draft --photo" in error
+    assert f'--worlds-dir "{worlds}"' in error
     assert not (worlds / "kitchen-photo-draft").exists()
     assert [entry["event"] for entry in read_cost_log(worlds)] == ["started", "settled"]
+
+
+def test_poll_failure_after_the_start_prints_the_free_fetch_command(
+    fake_api, photo, tmp_path, capsys
+):
+    fake_api.broken["/marble/v1/operations/op-1"] = "unavailable"
+    worlds = tmp_path / "worlds"
+
+    assert main(["generate", str(photo), "--worlds-dir", str(worlds), "--yes"]) == 1
+
+    error = capsys.readouterr().err
+    assert "HTTP 503" in error
+    assert "Do not run generate again" in error
+    assert "fetch --operation op-1 --name kitchen-photo-draft" in error
+
+
+def test_ctrl_c_while_waiting_prints_the_free_fetch_command(
+    fake_api, photo, tmp_path, monkeypatch, capsys
+):
+    def press_ctrl_c(_seconds):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli.time, "sleep", press_ctrl_c)
+
+    assert main(["generate", str(photo), "--worlds-dir", str(tmp_path / "w"), "--yes"]) == 130
+
+    assert "fetch --operation op-1 --name kitchen-photo-draft" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("failure", ["server error", "dropped", "not json", "no operation id"])
+def test_start_without_a_clear_answer_is_logged_as_unconfirmed(
+    fake_api, photo, tmp_path, capsys, failure
+):
+    fake_api.broken[GENERATE_PATH] = failure
+    worlds = tmp_path / "worlds"
+
+    assert main(["generate", str(photo), "--worlds-dir", str(worlds), "--yes"]) == 1
+
+    assert "may have started anyway" in capsys.readouterr().err
+    entries = [(entry["event"], entry["credits"]) for entry in read_cost_log(worlds)]
+    assert entries == [("unconfirmed", 230)]
+
+
+def test_refused_start_is_not_logged(fake_api, photo, tmp_path, capsys):
+    fake_api.broken[GENERATE_PATH] = "refused"
+    worlds = tmp_path / "worlds"
+
+    assert main(["generate", str(photo), "--worlds-dir", str(worlds), "--yes"]) == 1
+
+    assert "HTTP 400" in capsys.readouterr().err
+    assert not (worlds / "cost_log.jsonl").exists()
+
+
+def test_invalid_name_is_refused_before_any_call(fake_api, photo, tmp_path, capsys):
+    command = ["generate", str(photo), "--name", "living room?", "--yes"]
+
+    assert main([*command, "--worlds-dir", str(tmp_path / "w")]) == 1
+
+    assert "--name" in capsys.readouterr().err
+    assert fake_api.requests == []
 
 
 def test_uploads_an_upright_copy_without_metadata(fake_api, photo, tmp_path):
@@ -100,6 +165,7 @@ def test_uploads_an_upright_copy_without_metadata(fake_api, photo, tmp_path):
         assert uploaded.format == "JPEG"
         assert uploaded.size == (30, 40)  # the rotate-90 flag was applied to the pixels
         assert len(uploaded.getexif()) == 0  # no GPS, no orientation, nothing
+        assert "xmp" not in uploaded.info
         assert "comment" not in uploaded.info
 
 
@@ -126,6 +192,16 @@ def test_api_key_is_sent_only_to_the_api(fake_api, photo, tmp_path):
     assert storage_requests == 7  # one upload and six downloads
 
 
+def test_api_key_is_not_sent_on_a_redirect(fake_api, tmp_path, capsys):
+    fake_api.redirect_worlds = True
+    command = ["fetch", "--world", "world-1", "--name", "kitchen"]
+
+    assert main([*command, "--worlds-dir", str(tmp_path / "w")]) == 1
+
+    assert "HTTP 302" in capsys.readouterr().err
+    assert fake_api.paths() == ["GET /marble/v1/worlds/world-1"]
+
+
 def test_daily_cap_blocks_generation_before_any_paid_call(
     fake_api, photo, tmp_path, monkeypatch, capsys
 ):
@@ -143,7 +219,9 @@ def test_failed_generation_leaves_no_package(fake_api, photo, tmp_path, capsys):
 
     assert main(["generate", str(photo), "--worlds-dir", str(worlds), "--yes"]) == 1
 
-    assert "Generation failed (code 13)" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    assert "Generation failed (code 13)" in error
+    assert "fetch" not in error  # nothing to download
     assert sorted(path.name for path in worlds.iterdir()) == ["cost_log.jsonl"]
     assert [entry["event"] for entry in read_cost_log(worlds)] == ["started"]
 
@@ -160,6 +238,19 @@ def test_fetch_downloads_an_existing_world_for_free(fake_api, tmp_path):
     assert fake_api.paths()[0] == "GET /marble/v1/worlds/world-1"
     assert "POST /marble/v1/worlds:generate" not in fake_api.paths()
     assert not (worlds / "cost_log.jsonl").exists()
+
+
+@pytest.mark.parametrize(
+    ("reply", "message"),
+    [("dropped", "No response from GET"), ("not json", "Unreadable reply from GET")],
+)
+def test_broken_reply_is_a_clean_error(fake_api, tmp_path, capsys, reply, message):
+    fake_api.broken["/marble/v1/worlds/world-1"] = reply
+    command = ["fetch", "--world", "world-1", "--name", "kitchen"]
+
+    assert main([*command, "--worlds-dir", str(tmp_path / "w")]) == 1
+
+    assert message in capsys.readouterr().err
 
 
 def test_fetch_by_operation_downloads_the_full_world(fake_api, tmp_path):

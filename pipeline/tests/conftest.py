@@ -12,6 +12,15 @@ from PIL import ExifTags, Image
 
 from unpictured_pipeline import cli
 
+BROKEN_REPLIES = {
+    "refused": (400, {"detail": "invalid request"}),
+    "server error": (500, {"detail": "internal error"}),
+    "unavailable": (503, {"detail": "unavailable"}),
+    "dropped": (None, b""),
+    "not json": (200, b"<html>gateway page</html>"),
+    "no operation id": (200, {"done": False}),
+}
+
 
 class FakeWorldApi:
     def __init__(self):
@@ -19,8 +28,10 @@ class FakeWorldApi:
         self.requests: list[tuple[str, str, dict]] = []
         self.generate_bodies: list[dict] = []
         self.uploads: dict[str, bytes] = {}
+        self.broken: dict[str, str] = {}  # API path -> a BROKEN_REPLIES name
         self.fail_generation = False
         self.fail_downloads = False
+        self.redirect_worlds = False
         self.semantics: dict | None = {"metric_scale_factor": 1.5, "ground_plane_offset": 0.8}
         self._operation_polls = 0
 
@@ -57,7 +68,10 @@ class FakeWorldApi:
         world["assets"]["imagery"]["pano_url"] = None
         return world
 
-    def route(self, method: str, path: str, body: bytes) -> tuple[int, bytes | dict]:
+    def route(self, method: str, path: str, body: bytes) -> tuple[int | None, bytes | dict]:
+        """Returns (status, body). A None status hangs up without replying."""
+        if path in self.broken:
+            return BROKEN_REPLIES[self.broken[path]]
         if (method, path) == ("GET", "/marble/v1/credits"):
             return 200, {"remaining_credits": 6250}
         if (method, path) == ("POST", "/marble/v1/media-assets:prepare_upload"):
@@ -78,6 +92,9 @@ class FakeWorldApi:
         if (method, path) == ("GET", "/marble/v1/operations/op-1"):
             return 200, self._next_operation_state()
         if (method, path) == ("GET", "/marble/v1/worlds/world-1"):
+            if self.redirect_worlds:
+                other_host = self.base_url.replace("127.0.0.1", "localhost")
+                return 302, {"location": f"{other_host}/files/moved"}
             return 200, self.world()
         if method == "GET" and path.startswith("/files/"):
             if self.fail_downloads:
@@ -115,8 +132,13 @@ def make_handler(fake: FakeWorldApi) -> type[BaseHTTPRequestHandler]:
             headers = {name.lower(): value for name, value in self.headers.items()}
             fake.requests.append((self.command, path, headers))
             status, payload = fake.route(self.command, path, body)
+            if status is None:
+                self.close_connection = True
+                return
             data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
             self.send_response(status)
+            if 300 <= status < 400:
+                self.send_header("Location", payload["location"])
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
@@ -144,14 +166,16 @@ def fake_api(monkeypatch):
 
 @pytest.fixture
 def photo(tmp_path):
-    """A 40x30 JPEG like a phone's: GPS location, a rotate-90 flag and a comment."""
+    """A 40x30 JPEG like a phone's: GPS location, XMP, a rotate-90 flag and a comment."""
     path = tmp_path / "Kitchen Photo.jpg"
     exif = Image.Exif()
     exif[ExifTags.Base.Orientation] = 6
     gps = exif.get_ifd(ExifTags.IFD.GPSInfo)
     gps[ExifTags.GPS.GPSLatitudeRef] = "N"
     gps[ExifTags.GPS.GPSLatitude] = (40.0, 26.0, 46.0)
-    Image.new("RGB", (40, 30), "red").save(path, "JPEG", exif=exif, comment=b"home")
+    xmp = b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF/></x:xmpmeta>'
+    Image.new("RGB", (40, 30), "red").save(path, "JPEG", exif=exif, comment=b"home", xmp=xmp)
     with Image.open(path) as saved:
         assert saved.getexif().get_ifd(ExifTags.IFD.GPSInfo), "test photo must carry GPS"
+        assert "xmp" in saved.info, "test photo must carry XMP"
     return path

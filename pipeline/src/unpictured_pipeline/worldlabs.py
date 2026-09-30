@@ -1,5 +1,6 @@
 """A small client for the World Labs World API: https://docs.worldlabs.ai/api"""
 
+import http.client
 import json
 import shutil
 import urllib.error
@@ -9,6 +10,17 @@ from urllib.parse import urlsplit
 
 API_BASE_URL = "https://api.worldlabs.ai"
 USER_AGENT = "unpictured-pipeline"
+
+
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """urllib copies every header to a redirect target, so the API key would follow it."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None  # urllib then raises the 3xx as an HTTPError
+
+
+_API_OPENER = urllib.request.build_opener(_RefuseRedirects)
+_ASSET_OPENER = urllib.request.build_opener()
 
 
 class WorldLabsError(Exception):
@@ -43,7 +55,7 @@ class WorldLabsClient:
             method=upload_info["upload_method"],
             headers=headers,
         )
-        _open(request, self._timeout_seconds).close()
+        _open(request, self._timeout_seconds, _ASSET_OPENER).close()
         return prepared["media_asset"]["media_asset_id"]
 
     def start_generation(
@@ -77,22 +89,29 @@ class WorldLabsClient:
         request = urllib.request.Request(
             self._base_url + path, data=data, method=method, headers=headers
         )
-        with _open(request, self._timeout_seconds) as response:
-            return json.load(response)
+        with _open(request, self._timeout_seconds, _API_OPENER) as response:
+            try:
+                return json.load(response)
+            except (OSError, http.client.HTTPException, ValueError) as error:
+                raise WorldLabsError(f"Unreadable reply from {method} {path}: {error}") from None
 
 
 def download(url: str, destination: Path, timeout_seconds: float = 300) -> None:
     """Downloads a world asset from its CDN URL. Asset hosts never receive the API key."""
     partial = destination.with_name(destination.name + ".part")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with _open(request, timeout_seconds) as response, partial.open("wb") as file:
+    with _open(request, timeout_seconds, _ASSET_OPENER) as response, partial.open("wb") as file:
         shutil.copyfileobj(response, file)
     partial.replace(destination)
 
 
-def _open(request: urllib.request.Request, timeout_seconds: float):
+def _open(
+    request: urllib.request.Request,
+    timeout_seconds: float,
+    opener: urllib.request.OpenerDirector,
+):
     try:
-        return urllib.request.urlopen(request, timeout=timeout_seconds)
+        return opener.open(request, timeout=timeout_seconds)
     except urllib.error.HTTPError as error:
         detail = error.read().decode(errors="replace")[:500]
         raise WorldLabsError(
@@ -100,7 +119,8 @@ def _open(request: urllib.request.Request, timeout_seconds: float):
             f"{detail}",
             status=error.code,
         ) from None
-    except (urllib.error.URLError, TimeoutError) as error:
+    except (OSError, http.client.HTTPException) as error:
+        # URLError, timeouts, and dropped connections (which urllib leaves unwrapped).
         raise WorldLabsError(
             f"No response from {request.get_method()} {_without_query(request.full_url)}: {error}"
         ) from None

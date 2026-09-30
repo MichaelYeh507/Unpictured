@@ -26,11 +26,16 @@ DEFAULT_MODEL = "marble-1.0-draft"
 DEFAULT_DAILY_CAP_USD = 3.0
 MAX_UPLOAD_BYTES = 20_000_000
 PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+PACKAGE_NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
 POLL_SECONDS = 5
 WAIT_TIMEOUT_SECONDS = 30 * 60
 
 
 class UsageError(Exception):
+    pass
+
+
+class GenerationFailedError(Exception):
     pass
 
 
@@ -42,9 +47,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         return args.run(args)
-    except (UsageError, PhotoError, SpendingLimitError, WorldLabsError, FileExistsError) as error:
+    except (
+        UsageError,
+        PhotoError,
+        SpendingLimitError,
+        WorldLabsError,
+        GenerationFailedError,
+        FileExistsError,
+    ) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        print("Interrupted.", file=sys.stderr)
+        return 130
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -97,7 +112,7 @@ def run_credits(args: argparse.Namespace) -> int:
 def run_generate(args: argparse.Namespace) -> int:
     photo = check_photo(args.photo)
     worlds_dir = args.worlds_dir or default_worlds_dir()
-    name = args.name or default_package_name(photo, args.model)
+    name = check_name(args.name or default_package_name(photo, args.model))
     destination = worlds_dir / name
     if destination.exists():
         raise UsageError(f"{destination} already exists; choose another --name")
@@ -137,10 +152,11 @@ def run_generate(args: argparse.Namespace) -> int:
             f"Started operation {operation_id} (seed {seed}). "
             "Drafts take about 20 seconds, standard worlds about 5 minutes."
         )
-        operation = wait_for_operation(client, operation_id)
-        credits = record_settled_cost(cost_log, operation)
-        world_id = operation["response"]["world_id"]
+        world_id = None
         try:
+            operation = wait_for_operation(client, operation_id)
+            credits = record_settled_cost(cost_log, operation)
+            world_id = operation["response"]["world_id"]
             world = client.get_world(world_id)
             write_package(
                 world,
@@ -150,13 +166,10 @@ def run_generate(args: argparse.Namespace) -> int:
                 seed=seed,
                 credits=credits,
             )
-        except Exception:
-            print(
-                "The world was generated and billed. Download it again for free with: "
-                f"python -m unpictured_pipeline fetch --world {world_id} --name {name} "
-                f'--photo "{photo}"',
-                file=sys.stderr,
-            )
+        except GenerationFailedError:
+            raise
+        except BaseException:  # also Ctrl-C: the generation carries on without us
+            print_fetch_hint(photo, name, args.worlds_dir, operation_id, world_id)
             raise
     print_package_summary(destination, world, credits)
     return 0
@@ -164,7 +177,7 @@ def run_generate(args: argparse.Namespace) -> int:
 
 def run_fetch(args: argparse.Namespace) -> int:
     worlds_dir = args.worlds_dir or default_worlds_dir()
-    destination = worlds_dir / args.name
+    destination = worlds_dir / check_name(args.name)
     if destination.exists():
         raise UsageError(f"{destination} already exists; choose another --name")
     photo = check_photo(args.photo) if args.photo else None
@@ -208,18 +221,18 @@ def start_generation_logged(
     estimated_credits: float,
 ) -> str:
     try:
-        operation = client.start_generation(media_asset_id, model, name, seed)
-    except WorldLabsError as error:
-        # A 4xx means the start was refused. Anything else may have been accepted.
-        if error.status is None or error.status >= 500:
-            unknown_id = f"unconfirmed-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
-            cost_log.record("unconfirmed", unknown_id, estimated_credits, model=model, name=name)
-            raise WorldLabsError(
-                f"{error} The generation may have started anyway: check "
-                "https://platform.worldlabs.ai/usage before trying again."
-            ) from None
-        raise
-    operation_id = operation["operation_id"]
+        operation_id = client.start_generation(media_asset_id, model, name, seed)["operation_id"]
+    except Exception as error:
+        # Only a 4xx reply means the start was refused. Anything else may have started it.
+        if isinstance(error, WorldLabsError) and error.status and 400 <= error.status < 500:
+            raise
+        unknown_id = f"unconfirmed-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+        cost_log.record("unconfirmed", unknown_id, estimated_credits, model=model, name=name)
+        reason = error if isinstance(error, WorldLabsError) else f"Unexpected reply: {error!r}."
+        raise WorldLabsError(
+            f"{reason} The generation may have started anyway: check "
+            "https://platform.worldlabs.ai/usage before trying again."
+        ) from None
     cost_log.record("started", operation_id, estimated_credits, model=model, name=name, seed=seed)
     return operation_id
 
@@ -237,13 +250,13 @@ def wait_for_operation(client: WorldLabsClient, operation_id: str) -> dict:
             last_progress = progress
         if time.monotonic() > deadline:
             raise WorldLabsError(
-                f"Still running after {WAIT_TIMEOUT_SECONDS // 60} minutes. Resume with: "
-                f"python -m unpictured_pipeline fetch --operation {operation_id} --name <name>"
+                f"Operation {operation_id} is still running after "
+                f"{WAIT_TIMEOUT_SECONDS // 60} minutes."
             )
         time.sleep(POLL_SECONDS)
     error = operation.get("error")
     if error:
-        raise WorldLabsError(
+        raise GenerationFailedError(
             f"Generation failed (code {error.get('code')}): {error.get('message')}"
         )
     return operation
@@ -264,6 +277,24 @@ def record_settled_cost(cost_log: CostLog, operation: dict) -> float | None:
         line_items=cost.get("line_items", []),
     )
     return credits
+
+
+def print_fetch_hint(
+    photo: Path, name: str, worlds_dir: Path | None, operation_id: str, world_id: str | None
+) -> None:
+    if world_id:
+        state, source = "was generated and billed", f"--world {world_id}"
+    else:
+        state, source = "was started and will be billed", f"--operation {operation_id}"
+    command = f'python -m unpictured_pipeline fetch {source} --name {name} --photo "{photo}"'
+    if worlds_dir:
+        command += f' --worlds-dir "{worlds_dir}"'
+    print(
+        f"Do not run generate again: the world {state}. Download it for free with: {command}",
+        file=sys.stderr,
+    )
+    if not world_id:
+        print("Operations expire about 3 hours after they start.", file=sys.stderr)
 
 
 def print_package_summary(destination: Path, world: dict, credits: float | None) -> None:
@@ -302,6 +333,15 @@ def check_photo(photo: Path) -> Path:
             "(convert HEIC photos to JPG first)"
         )
     return photo
+
+
+def check_name(name: str) -> str:
+    if not PACKAGE_NAME.fullmatch(name):
+        raise UsageError(
+            f"--name {name!r}: use lowercase letters, digits and hyphens "
+            "(it becomes a folder and a URL)"
+        )
+    return name
 
 
 def default_package_name(photo: Path, model: str) -> str:
