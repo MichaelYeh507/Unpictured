@@ -152,7 +152,7 @@ def run_generate(args: argparse.Namespace) -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         uploads = prepare_uploads(photos, Path(temp_dir))
         for index, photo in enumerate(photos):
-            direction = "" if azimuths is None else f" at azimuth {azimuths[index]:g}"
+            direction = "" if azimuths is None else f" at azimuth {azimuths[index]}"
             print(
                 f"Photo:   {photo.name}{direction}, uploaded as a "
                 f"{uploads[index].stat().st_size / 1e6:.1f} MB JPEG with its metadata removed"
@@ -340,7 +340,7 @@ def print_fetch_hint(
     for photo in photos:
         command += f' --photo "{photo}"'
     for azimuth in azimuths or []:
-        command += f" --azimuth {azimuth:g}"
+        command += f" --azimuth {azimuth}"  # the exact value, so the command round-trips
     if worlds_dir:
         command += f' --worlds-dir "{worlds_dir}"'
     print(
@@ -414,9 +414,11 @@ def check_azimuths(photos: list[Path], azimuths: list[float]) -> list[float] | N
     for azimuth in azimuths:
         if not 0 <= azimuth < 360:
             raise UsageError(
-                f"--azimuth {azimuth:g}: use degrees from 0 up to 360 "
+                f"--azimuth {azimuth}: use degrees from 0 up to 360 "
                 "(0 front, 90 right, 180 back, 270 left)"
             )
+    if len(set(azimuths)) != len(azimuths):
+        raise UsageError("Two photos have the same --azimuth; give each photo its own direction")
     return azimuths
 
 

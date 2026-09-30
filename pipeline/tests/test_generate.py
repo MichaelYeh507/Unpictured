@@ -1,5 +1,6 @@
 import io
 import json
+import shlex
 
 import pytest
 from PIL import Image
@@ -55,10 +56,10 @@ def test_generate_writes_package_and_logs_cost(fake_api, photo, tmp_path, cost_l
     request = fake_api.generate_bodies[0]
     assert request["model"] == "marble-1.0-draft"
     assert request["permission"]["public"] is False
-    assert request["world_prompt"]["is_pano"] is False
-    assert request["world_prompt"]["image_prompt"] == {
-        "source": "media_asset",
-        "media_asset_id": "asset-1",
+    assert request["world_prompt"] == {
+        "type": "image",
+        "image_prompt": {"source": "media_asset", "media_asset_id": "asset-1"},
+        "is_pano": False,
     }
 
     meta = json.loads((package / "meta.json").read_text(encoding="utf-8"))
@@ -121,8 +122,8 @@ def test_dry_run_prices_two_photos_and_shows_each_direction(
     assert main([*command, "--worlds-dir", str(tmp_path / "w")]) == 0
 
     output = capsys.readouterr().out
-    assert "Living Room.jpg at azimuth 0," in output
-    assert "Kitchen Photo.jpg at azimuth 180," in output
+    assert "Living Room.jpg at azimuth 0.0," in output
+    assert "Kitchen Photo.jpg at azimuth 180.0," in output
     assert "about 250 credits ($0.20)" in output
     assert fake_api.paths() == ["GET /marble/v1/credits"]
 
@@ -135,9 +136,10 @@ def test_dry_run_prices_two_photos_and_shows_each_direction(
         (3, ["0", "90", "180", "270"], "3 photos need 3 --azimuth values"),
         (1, ["0"], "--azimuth is only for two or more photos"),
         (5, ["0", "72", "144", "216", "288"], "the World API takes at most 4"),
-        (2, ["0", "360"], "--azimuth 360: use degrees from 0 up to 360"),
-        (2, ["-90", "90"], "--azimuth -90:"),
+        (2, ["0", "360"], "--azimuth 360.0: use degrees from 0 up to 360"),
+        (2, ["-90", "90"], "--azimuth -90.0:"),
         (2, ["0", "nan"], "--azimuth nan:"),
+        (2, ["90", "90"], "Two photos have the same --azimuth"),
     ],
 )
 def test_photo_directions_are_checked_before_any_call(
@@ -153,16 +155,61 @@ def test_photo_directions_are_checked_before_any_call(
     assert fake_api.requests == []
 
 
-def test_two_photo_fetch_hint_repeats_every_photo_and_direction(
+def test_two_photo_fetch_hint_rebuilds_the_whole_package(
     fake_api, photo, second_photo, tmp_path, capsys
 ):
     fake_api.fail_downloads = True
+    worlds = tmp_path / "worlds"
+    directions = ["--azimuth", "0", "--azimuth", "359.9999999"]
+    command = ["generate", str(second_photo), str(photo), *directions, "--name", "room"]
+
+    assert main([*command, "--worlds-dir", str(worlds), "--yes"]) == 1
+
+    error = capsys.readouterr().err
+    hint = error.split("Download it for free with: python -m unpictured_pipeline ")[1]
+    fake_api.fail_downloads = False
+    assert main(shlex.split(hint.splitlines()[0])) == 0
+    package = worlds / "room"
+    assert sorted(path.name for path in package.iterdir()) == TWO_PHOTO_PACKAGE_FILES
+    meta = json.loads((package / "meta.json").read_text(encoding="utf-8"))
+    assert meta["photo_azimuths"] == [0, 359.9999999]
+
+
+def test_two_photo_start_without_a_clear_answer_is_logged_at_the_two_photo_price(
+    fake_api, photo, second_photo, tmp_path, cost_log
+):
+    fake_api.broken[GENERATE_PATH] = "dropped"
     command = ["generate", str(second_photo), str(photo), "--azimuth", "0", "--azimuth", "180"]
 
-    assert main([*command, "--name", "room", "--worlds-dir", str(tmp_path / "w"), "--yes"]) == 1
+    assert main([*command, "--worlds-dir", str(tmp_path / "w"), "--yes"]) == 1
 
-    hint = f'--name room --photo "{second_photo}" --photo "{photo}" --azimuth 0 --azimuth 180'
-    assert hint in capsys.readouterr().err
+    entries = [(entry["event"], entry["credits"]) for entry in read_cost_log(cost_log)]
+    assert entries == [("unconfirmed", 250)]
+
+
+def test_daily_cap_uses_the_two_photo_price(
+    fake_api, photo, second_photo, tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setenv("UNPICTURED_DAILY_CAP_USD", "0.19")  # one photo $0.18 fits, two $0.20 not
+    command = ["generate", str(second_photo), str(photo), "--azimuth", "0", "--azimuth", "180"]
+
+    assert main([*command, "--worlds-dir", str(tmp_path / "w"), "--yes"]) == 1
+
+    assert "would bring today's spend to $0.20" in capsys.readouterr().err
+    assert fake_api.paths() == ["GET /marble/v1/credits"]
+
+
+def test_failed_second_upload_starts_and_logs_nothing(
+    fake_api, photo, second_photo, tmp_path, cost_log, capsys
+):
+    fake_api.broken["/upload/asset-2"] = "unavailable"
+    command = ["generate", str(second_photo), str(photo), "--azimuth", "0", "--azimuth", "180"]
+
+    assert main([*command, "--worlds-dir", str(tmp_path / "w"), "--yes"]) == 1
+
+    assert "HTTP 503" in capsys.readouterr().err
+    assert fake_api.generate_bodies == []
+    assert not cost_log.exists()
 
 
 def test_fetch_with_two_photos_saves_both_and_their_directions(
