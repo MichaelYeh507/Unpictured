@@ -119,7 +119,7 @@ def run_generate(args: argparse.Namespace) -> int:
 
     estimated_credits = ESTIMATED_CREDITS_FROM_PHOTO[args.model]
     cap_usd = daily_cap_usd()
-    cost_log = CostLog(worlds_dir / "cost_log.jsonl")
+    cost_log = CostLog(cost_log_path())
     today = datetime.now().astimezone().date()
     spent_usd = credits_to_usd(cost_log.credits_started_on(today))
     client = api_client()
@@ -137,6 +137,7 @@ def run_generate(args: argparse.Namespace) -> int:
         )
         print(f"Balance: {remaining:,.0f} credits")
         print(f"Today:   ${spent_usd:.2f} spent of the ${cap_usd:.2f} daily cap")
+        print(f"Log:     {cost_log.path}")
         print(f"Package: {destination}")
         if not args.yes:
             print("Dry run: nothing was spent. Add --yes to generate.")
@@ -182,7 +183,7 @@ def run_fetch(args: argparse.Namespace) -> int:
     credits = None
     if args.operation:
         operation = wait_for_operation(client, args.operation)
-        credits = record_settled_cost(CostLog(worlds_dir / "cost_log.jsonl"), operation)
+        credits = record_settled_cost(CostLog(cost_log_path()), operation)
         world_id = operation["response"]["world_id"]
     else:
         world_id = args.world
@@ -317,6 +318,12 @@ def api_client() -> WorldLabsClient:
         )
     base_url = os.environ.get("UNPICTURED_API_BASE_URL", API_BASE_URL)
     return WorldLabsClient(api_key, base_url)
+
+
+def cost_log_path() -> Path:
+    """One log per user, so every clone and --worlds-dir counts toward the same daily cap."""
+    override = os.environ.get("UNPICTURED_COST_LOG")
+    return Path(override) if override else Path.home() / ".unpictured" / "cost_log.jsonl"
 
 
 def daily_cap_usd() -> float:

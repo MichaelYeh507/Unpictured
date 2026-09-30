@@ -21,8 +21,8 @@ PACKAGE_FILES = [
 ]
 
 
-def read_cost_log(worlds):
-    lines = (worlds / "cost_log.jsonl").read_text(encoding="utf-8").splitlines()
+def read_cost_log(path):
+    lines = path.read_text(encoding="utf-8").splitlines()
     return [json.loads(line) for line in lines]
 
 
@@ -38,7 +38,7 @@ def test_dry_run_spends_nothing(fake_api, photo, tmp_path, capsys):
     assert not worlds.exists()
 
 
-def test_generate_writes_package_and_logs_cost(fake_api, photo, tmp_path):
+def test_generate_writes_package_and_logs_cost(fake_api, photo, tmp_path, cost_log):
     worlds = tmp_path / "worlds"
 
     assert main(["generate", str(photo), "--worlds-dir", str(worlds), "--yes"]) == 0
@@ -67,7 +67,7 @@ def test_generate_writes_package_and_logs_cost(fake_api, photo, tmp_path):
     assert meta["ground_plane_offset"] == 0.8
     assert meta["credits"] == 230
 
-    events = [(entry["event"], entry["credits"]) for entry in read_cost_log(worlds)]
+    events = [(entry["event"], entry["credits"]) for entry in read_cost_log(cost_log)]
     assert events == [("started", 230), ("settled", 230)]
 
 
@@ -83,7 +83,7 @@ def test_world_without_semantics_metadata_gets_null_scale_and_offset(fake_api, p
 
 
 def test_download_failure_after_billing_prints_the_free_fetch_command(
-    fake_api, photo, tmp_path, capsys
+    fake_api, photo, tmp_path, cost_log, capsys
 ):
     fake_api.fail_downloads = True
     worlds = tmp_path / "worlds"
@@ -96,7 +96,7 @@ def test_download_failure_after_billing_prints_the_free_fetch_command(
     assert "fetch --world world-1 --name kitchen-photo-draft --photo" in error
     assert f'--worlds-dir "{worlds}"' in error
     assert not (worlds / "kitchen-photo-draft").exists()
-    assert [entry["event"] for entry in read_cost_log(worlds)] == ["started", "settled"]
+    assert [entry["event"] for entry in read_cost_log(cost_log)] == ["started", "settled"]
 
 
 def test_poll_failure_after_the_start_prints_the_free_fetch_command(
@@ -131,7 +131,7 @@ def test_ctrl_c_while_waiting_prints_the_free_fetch_command(
     ["server error", "moved", "dropped", "not json", "no operation id", "not an object"],
 )
 def test_start_without_a_clear_answer_is_logged_as_unconfirmed(
-    fake_api, photo, tmp_path, capsys, failure
+    fake_api, photo, tmp_path, cost_log, capsys, failure
 ):
     fake_api.broken[GENERATE_PATH] = failure
     worlds = tmp_path / "worlds"
@@ -139,12 +139,12 @@ def test_start_without_a_clear_answer_is_logged_as_unconfirmed(
     assert main(["generate", str(photo), "--worlds-dir", str(worlds), "--yes"]) == 1
 
     assert "may have started anyway" in capsys.readouterr().err
-    entries = [(entry["event"], entry["credits"]) for entry in read_cost_log(worlds)]
+    entries = [(entry["event"], entry["credits"]) for entry in read_cost_log(cost_log)]
     assert entries == [("unconfirmed", 230)]
 
 
 def test_ctrl_c_during_the_start_is_logged_as_unconfirmed(
-    fake_api, photo, tmp_path, monkeypatch, capsys
+    fake_api, photo, tmp_path, cost_log, monkeypatch, capsys
 ):
     def press_ctrl_c(*_args):
         raise KeyboardInterrupt
@@ -155,17 +155,17 @@ def test_ctrl_c_during_the_start_is_logged_as_unconfirmed(
     assert main(["generate", str(photo), "--worlds-dir", str(worlds), "--yes"]) == 130
 
     assert "may have started anyway" in capsys.readouterr().err
-    assert [entry["event"] for entry in read_cost_log(worlds)] == ["unconfirmed"]
+    assert [entry["event"] for entry in read_cost_log(cost_log)] == ["unconfirmed"]
 
 
-def test_refused_start_is_not_logged(fake_api, photo, tmp_path, capsys):
+def test_refused_start_is_not_logged(fake_api, photo, tmp_path, cost_log, capsys):
     fake_api.broken[GENERATE_PATH] = "refused"
     worlds = tmp_path / "worlds"
 
     assert main(["generate", str(photo), "--worlds-dir", str(worlds), "--yes"]) == 1
 
     assert "HTTP 400" in capsys.readouterr().err
-    assert not (worlds / "cost_log.jsonl").exists()
+    assert not cost_log.exists()
 
 
 def test_invalid_name_is_refused_before_any_call(fake_api, photo, tmp_path, capsys):
@@ -233,7 +233,26 @@ def test_daily_cap_blocks_generation_before_any_paid_call(
     assert fake_api.paths() == ["GET /marble/v1/credits"]
 
 
-def test_failed_generation_leaves_no_package(fake_api, photo, tmp_path, capsys):
+def test_daily_cap_counts_spending_from_every_worlds_folder(
+    fake_api, photo, tmp_path, monkeypatch, capsys
+):
+    assert main(["generate", str(photo), "--worlds-dir", str(tmp_path / "a"), "--yes"]) == 0
+    monkeypatch.setenv("UNPICTURED_DAILY_CAP_USD", "0.30")
+
+    assert main(["generate", str(photo), "--worlds-dir", str(tmp_path / "b"), "--yes"]) == 1
+
+    assert "would bring today's spend to $0.37" in capsys.readouterr().err
+
+
+def test_cost_log_defaults_to_the_home_folder(tmp_path, monkeypatch):
+    monkeypatch.delenv("UNPICTURED_COST_LOG")
+    monkeypatch.setenv("HOME", str(tmp_path))  # Path.home() on Linux and macOS
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))  # and on Windows
+
+    assert cli.cost_log_path() == tmp_path / ".unpictured" / "cost_log.jsonl"
+
+
+def test_failed_generation_leaves_no_package(fake_api, photo, tmp_path, cost_log, capsys):
     fake_api.fail_generation = True
     worlds = tmp_path / "worlds"
 
@@ -242,11 +261,11 @@ def test_failed_generation_leaves_no_package(fake_api, photo, tmp_path, capsys):
     error = capsys.readouterr().err
     assert "Generation failed (code 13)" in error
     assert "fetch" not in error  # nothing to download
-    assert sorted(path.name for path in worlds.iterdir()) == ["cost_log.jsonl"]
-    assert [entry["event"] for entry in read_cost_log(worlds)] == ["started"]
+    assert not worlds.exists()
+    assert [entry["event"] for entry in read_cost_log(cost_log)] == ["started"]
 
 
-def test_fetch_downloads_an_existing_world_for_free(fake_api, tmp_path):
+def test_fetch_downloads_an_existing_world_for_free(fake_api, tmp_path, cost_log):
     worlds = tmp_path / "worlds"
 
     assert (
@@ -257,7 +276,7 @@ def test_fetch_downloads_an_existing_world_for_free(fake_api, tmp_path):
     assert meta["world_id"] == "world-1"
     assert fake_api.paths()[0] == "GET /marble/v1/worlds/world-1"
     assert "POST /marble/v1/worlds:generate" not in fake_api.paths()
-    assert not (worlds / "cost_log.jsonl").exists()
+    assert not cost_log.exists()
 
 
 @pytest.mark.parametrize(
@@ -296,7 +315,7 @@ def test_download_dropped_mid_file_is_a_clean_error(fake_api, tmp_path, monkeypa
     assert "connection reset by peer" in capsys.readouterr().err
 
 
-def test_fetch_by_operation_downloads_the_full_world(fake_api, tmp_path):
+def test_fetch_by_operation_downloads_the_full_world(fake_api, tmp_path, cost_log):
     worlds = tmp_path / "worlds"
     command = ["fetch", "--operation", "op-1", "--name", "kitchen", "--worlds-dir", str(worlds)]
 
@@ -307,16 +326,17 @@ def test_fetch_by_operation_downloads_the_full_world(fake_api, tmp_path):
     meta = json.loads((package / "meta.json").read_text(encoding="utf-8"))
     assert meta["model"] == "marble-1.0-draft"
     assert meta["credits"] == 230
+    assert [entry["event"] for entry in read_cost_log(cost_log)] == ["settled"]
 
 
-def test_fetch_by_operation_logs_a_settled_cost_only_once(fake_api, photo, tmp_path):
+def test_fetch_by_operation_logs_a_settled_cost_only_once(fake_api, photo, tmp_path, cost_log):
     worlds = tmp_path / "worlds"
     assert main(["generate", str(photo), "--worlds-dir", str(worlds), "--yes"]) == 0
     command = ["fetch", "--operation", "op-1", "--name", "again", "--worlds-dir", str(worlds)]
 
     assert main(command) == 0
 
-    events = [entry["event"] for entry in read_cost_log(worlds)]
+    events = [entry["event"] for entry in read_cost_log(cost_log)]
     assert events == ["started", "settled"]
     meta = json.loads((worlds / "again" / "meta.json").read_text(encoding="utf-8"))
     assert meta["credits"] == 230

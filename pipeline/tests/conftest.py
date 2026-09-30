@@ -155,6 +155,14 @@ def make_handler(fake: FakeWorldApi) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
+@pytest.fixture(autouse=True)
+def cost_log(tmp_path, monkeypatch):
+    """Every test gets its own cost log, never the real one in the home folder."""
+    path = tmp_path / "cost_log.jsonl"
+    monkeypatch.setenv("UNPICTURED_COST_LOG", str(path))
+    return path
+
+
 @pytest.fixture
 def fake_api(monkeypatch):
     fake = FakeWorldApi()
