@@ -8,8 +8,10 @@ Worlds are generated from photos with the World Labs Marble API and rendered in 
 
 ## Layout
 
-- `web/`: the game client (Vite, TypeScript, three.js)
+- `web/`: the game client (Vite, TypeScript, three.js, Spark)
+- `core/`: engine-agnostic TypeScript (no three.js, Spark or DOM), such as coordinate frames
 - `pipeline/`: Python tools that generate and prepare world packages
+- `tests/`: language-neutral test vectors that every engine's code must pass
 
 ## Develop
 
@@ -32,6 +34,10 @@ uv run --env-file <key file> python -m unpictured_pipeline credits              
 uv run --env-file <key file> python -m unpictured_pipeline generate photo.jpg      # dry run: price
 uv run --env-file <key file> python -m unpictured_pipeline generate photo.jpg --yes
 ```
+
+To walk around a world, run `npm run dev` and open `http://localhost:5173/?world=<name>`, where
+`<name>` is a folder in `worlds/`. Drag to look, W A S D to move, E up, Q down. Draft worlds have
+no metric data, so they show at raw scale with a notice on screen.
 
 `generate` defaults to the cheap draft model and refuses to pass a daily cap
 (`UNPICTURED_DAILY_CAP_USD`, default $3). Every paid call is logged to one file per user,

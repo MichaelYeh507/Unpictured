@@ -31,5 +31,31 @@
         "organizeImports": "on"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["core/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "three": "core/ is engine-agnostic: no three.js or Spark (renderers belong in web/).",
+                  "@sparkjsdev/spark": "core/ is engine-agnostic: no three.js or Spark (renderers belong in web/)."
+                },
+                "patterns": [
+                  {
+                    "group": ["three/**", "@sparkjsdev/**"],
+                    "message": "core/ is engine-agnostic: no three.js or Spark (renderers belong in web/)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

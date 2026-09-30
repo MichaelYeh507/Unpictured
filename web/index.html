@@ -15,9 +15,32 @@
       canvas {
         display: block;
       }
+      #hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        max-width: 36em;
+        padding: 8px 10px;
+        font: 13px/1.5 ui-monospace, monospace;
+        color: #f0f0f0;
+        background: rgb(0 0 0 / 55%);
+        border-radius: 6px;
+        pointer-events: none;
+      }
+      #notice {
+        color: #ffd479;
+      }
+      #notice:empty {
+        display: none;
+      }
     </style>
   </head>
   <body>
+    <div id="hud">
+      <div id="status">Starting...</div>
+      <div id="position"></div>
+      <div id="notice"></div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
