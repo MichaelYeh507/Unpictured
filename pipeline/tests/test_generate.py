@@ -19,6 +19,9 @@ PACKAGE_FILES = [
     "splats_500k.spz",
     "thumbnail.webp",
 ]
+TWO_PHOTO_PACKAGE_FILES = sorted(
+    [name for name in PACKAGE_FILES if name != "source.jpg"] + ["source_1.jpg", "source_2.jpg"]
+)
 
 
 def read_cost_log(path):
@@ -67,9 +70,115 @@ def test_generate_writes_package_and_logs_cost(fake_api, photo, tmp_path, cost_l
     assert meta["metric_scale_factor"] == 1.5
     assert meta["ground_plane_offset"] == 0.8
     assert meta["credits"] == 230
+    assert meta["files"]["source_photo"] == "source.jpg"
+    assert meta["photo_azimuths"] is None
 
     events = [(entry["event"], entry["credits"]) for entry in read_cost_log(cost_log)]
     assert events == [("started", 230), ("settled", 230)]
+
+
+def test_two_photos_make_one_world_placed_by_direction(
+    fake_api, photo, second_photo, tmp_path, cost_log
+):
+    fake_api.billed_credits = 250
+    worlds = tmp_path / "worlds"
+    command = ["generate", str(second_photo), str(photo), "--azimuth", "0", "--azimuth", "180"]
+
+    assert main([*command, "--name", "room", "--worlds-dir", str(worlds), "--yes"]) == 0
+
+    assert fake_api.generate_bodies[0]["world_prompt"] == {
+        "type": "multi-image",
+        "multi_image_prompt": [
+            {"azimuth": 0, "content": {"source": "media_asset", "media_asset_id": "asset-1"}},
+            {"azimuth": 180, "content": {"source": "media_asset", "media_asset_id": "asset-2"}},
+        ],
+        "reconstruct_images": False,
+    }
+    package = worlds / "room"
+    assert sorted(path.name for path in package.iterdir()) == TWO_PHOTO_PACKAGE_FILES
+    assert (package / "source_1.jpg").read_bytes() == fake_api.uploads["asset-1"]
+    assert (package / "source_2.jpg").read_bytes() == fake_api.uploads["asset-2"]
+    with Image.open(package / "source_1.jpg") as first:
+        red, _green, blue = first.getpixel((0, 0))
+        assert blue > 200 and red < 50  # the first photo given (blue) stays first
+    for upload in fake_api.uploads.values():
+        with Image.open(io.BytesIO(upload)) as uploaded:
+            assert len(uploaded.getexif()) == 0
+
+    meta = json.loads((package / "meta.json").read_text(encoding="utf-8"))
+    assert meta["photo_azimuths"] == [0, 180]
+    assert meta["files"]["source_photo_1"] == "source_1.jpg"
+    assert meta["files"]["source_photo_2"] == "source_2.jpg"
+    events = [(entry["event"], entry["credits"]) for entry in read_cost_log(cost_log)]
+    assert events == [("started", 250), ("settled", 250)]
+
+
+def test_dry_run_prices_two_photos_and_shows_each_direction(
+    fake_api, photo, second_photo, tmp_path, capsys
+):
+    command = ["generate", str(second_photo), str(photo), "--azimuth", "0", "--azimuth", "180"]
+
+    assert main([*command, "--worlds-dir", str(tmp_path / "w")]) == 0
+
+    output = capsys.readouterr().out
+    assert "Living Room.jpg at azimuth 0," in output
+    assert "Kitchen Photo.jpg at azimuth 180," in output
+    assert "about 250 credits ($0.20)" in output
+    assert fake_api.paths() == ["GET /marble/v1/credits"]
+
+
+@pytest.mark.parametrize(
+    ("photo_count", "azimuths", "message"),
+    [
+        (2, [], "2 photos need 2 --azimuth values"),
+        (2, ["90"], "2 photos need 2 --azimuth values"),
+        (3, ["0", "90", "180", "270"], "3 photos need 3 --azimuth values"),
+        (1, ["0"], "--azimuth is only for two or more photos"),
+        (5, ["0", "72", "144", "216", "288"], "the World API takes at most 4"),
+        (2, ["0", "360"], "--azimuth 360: use degrees from 0 up to 360"),
+        (2, ["-90", "90"], "--azimuth -90:"),
+        (2, ["0", "nan"], "--azimuth nan:"),
+    ],
+)
+def test_photo_directions_are_checked_before_any_call(
+    fake_api, photo, tmp_path, capsys, photo_count, azimuths, message
+):
+    command = ["generate", *[str(photo)] * photo_count]
+    for azimuth in azimuths:
+        command += ["--azimuth", azimuth]
+
+    assert main([*command, "--worlds-dir", str(tmp_path / "w"), "--yes"]) == 1
+
+    assert message in capsys.readouterr().err
+    assert fake_api.requests == []
+
+
+def test_two_photo_fetch_hint_repeats_every_photo_and_direction(
+    fake_api, photo, second_photo, tmp_path, capsys
+):
+    fake_api.fail_downloads = True
+    command = ["generate", str(second_photo), str(photo), "--azimuth", "0", "--azimuth", "180"]
+
+    assert main([*command, "--name", "room", "--worlds-dir", str(tmp_path / "w"), "--yes"]) == 1
+
+    hint = f'--name room --photo "{second_photo}" --photo "{photo}" --azimuth 0 --azimuth 180'
+    assert hint in capsys.readouterr().err
+
+
+def test_fetch_with_two_photos_saves_both_and_their_directions(
+    fake_api, photo, second_photo, tmp_path
+):
+    worlds = tmp_path / "worlds"
+    command = ["fetch", "--world", "world-1", "--name", "room", "--worlds-dir", str(worlds)]
+    command += ["--photo", str(second_photo), "--photo", str(photo)]
+
+    assert main([*command, "--azimuth", "0", "--azimuth", "180"]) == 0
+
+    package = worlds / "room"
+    assert sorted(path.name for path in package.iterdir()) == TWO_PHOTO_PACKAGE_FILES
+    meta = json.loads((package / "meta.json").read_text(encoding="utf-8"))
+    assert meta["photo_azimuths"] == [0, 180]
+    assert "POST /marble/v1/worlds:generate" not in fake_api.paths()
 
 
 def test_world_without_semantics_metadata_gets_null_scale_and_offset(fake_api, photo, tmp_path):

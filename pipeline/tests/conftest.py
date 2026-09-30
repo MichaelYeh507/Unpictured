@@ -35,8 +35,10 @@ class FakeWorldApi:
         self.fail_generation = False
         self.fail_downloads = False
         self.redirect_worlds = False
+        self.billed_credits = 230
         self.semantics: dict | None = {"metric_scale_factor": 1.5, "ground_plane_offset": 0.8}
         self._operation_polls = 0
+        self._prepared_uploads = 0
 
     def paths(self) -> list[str]:
         return [f"{method} {path}" for method, path, _ in self.requests]
@@ -78,16 +80,18 @@ class FakeWorldApi:
         if (method, path) == ("GET", "/marble/v1/credits"):
             return 200, {"remaining_credits": 6250}
         if (method, path) == ("POST", "/marble/v1/media-assets:prepare_upload"):
+            self._prepared_uploads += 1
+            asset_id = f"asset-{self._prepared_uploads}"
             return 200, {
-                "media_asset": {"media_asset_id": "asset-1", "file_name": "photo.jpg"},
+                "media_asset": {"media_asset_id": asset_id, "file_name": "photo.jpg"},
                 "upload_info": {
-                    "upload_url": f"{self.base_url}/upload/asset-1?signature=secret",
+                    "upload_url": f"{self.base_url}/upload/{asset_id}?signature=secret",
                     "upload_method": "PUT",
                     "required_headers": {"x-goog-content-length-range": "0,1048576000"},
                 },
             }
-        if (method, path) == ("PUT", "/upload/asset-1"):
-            self.uploads["asset-1"] = body
+        if method == "PUT" and path.startswith("/upload/"):
+            self.uploads[path.removeprefix("/upload/")] = body
             return 200, b""
         if (method, path) == ("POST", "/marble/v1/worlds:generate"):
             self.generate_bodies.append(json.loads(body))
@@ -113,7 +117,8 @@ class FakeWorldApi:
         if self.fail_generation:
             error = {"code": 13, "message": "generation failed"}
             return {"operation_id": "op-1", "done": True, "error": error}
-        cost = {"total_credits": 230, "line_items": [{"name": "Draft world", "credits": 230}]}
+        line_items = [{"name": "Draft world", "credits": self.billed_credits}]
+        cost = {"total_credits": self.billed_credits, "line_items": line_items}
         response = self.operation_response()
         return {"operation_id": "op-1", "done": True, "response": response, "cost": cost}
 
@@ -192,4 +197,16 @@ def photo(tmp_path):
     with Image.open(path) as saved:
         assert saved.getexif().get_ifd(ExifTags.IFD.GPSInfo), "test photo must carry GPS"
         assert "xmp" in saved.info, "test photo must carry XMP"
+    return path
+
+
+@pytest.fixture
+def second_photo(tmp_path):
+    """Another phone-like JPEG with GPS, in a different colour so its upload is distinct."""
+    path = tmp_path / "Living Room.jpg"
+    exif = Image.Exif()
+    gps = exif.get_ifd(ExifTags.IFD.GPSInfo)
+    gps[ExifTags.GPS.GPSLatitudeRef] = "N"
+    gps[ExifTags.GPS.GPSLatitude] = (40.0, 26.0, 46.0)
+    Image.new("RGB", (40, 30), "blue").save(path, "JPEG", exif=exif)
     return path

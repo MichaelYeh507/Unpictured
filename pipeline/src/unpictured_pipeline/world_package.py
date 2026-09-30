@@ -14,11 +14,17 @@ from unpictured_pipeline.worldlabs import download
 SPLAT_FILE_NAMES = {"full_res": "splats.spz", "500k": "splats_500k.spz", "100k": "splats_100k.spz"}
 
 
+def source_photo_name(index: int, count: int) -> str:
+    """source.jpg for a one-photo world, else source_1.jpg, source_2.jpg and so on."""
+    return "source.jpg" if count == 1 else f"source_{index}.jpg"
+
+
 def write_package(
     world: dict,
     destination: Path,
     *,
-    source_photo: Path | None = None,
+    source_photos: list[Path] | None = None,
+    photo_azimuths: list[float] | None = None,
     operation_id: str | None = None,
     seed: int | None = None,
     credits: float | None = None,
@@ -52,10 +58,12 @@ def write_package(
             file_name = key + _extension_of(url)
             download(url, staging / file_name)
             files[key] = file_name
-    if source_photo is not None:
-        file_name = "source" + source_photo.suffix.lower()
-        shutil.copyfile(source_photo, staging / file_name)
-        files["source_photo"] = file_name
+    photos = source_photos or []
+    for index, photo in enumerate(photos, start=1):
+        file_name = source_photo_name(index, len(photos))
+        shutil.copyfile(photo, staging / file_name)
+        role = "source_photo" if len(photos) == 1 else f"source_photo_{index}"
+        files[role] = file_name
 
     meta = {
         "package_format": "provisional-m0",
@@ -72,6 +80,8 @@ def write_package(
         "frame": "marble_raw_opencv",
         "metric_scale_factor": semantics.get("metric_scale_factor"),
         "ground_plane_offset": semantics.get("ground_plane_offset"),
+        # Degrees, one per photo in the order of source_photo_1, source_photo_2 and so on.
+        "photo_azimuths": photo_azimuths,
         "files": files,
     }
     (staging / "meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")

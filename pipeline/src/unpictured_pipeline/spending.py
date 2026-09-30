@@ -14,6 +14,13 @@ ESTIMATED_CREDITS_FROM_PHOTO = {
     "marble-1.1": 1580,
     "marble-1.1-plus": 3080,
 }
+# Two to four photos: the panorama step costs 100 credits instead of 80 (checked 2026-09-30).
+ESTIMATED_CREDITS_FROM_PHOTOS = {
+    "marble-1.0-draft": 250,
+    "marble-1.0": 1600,
+    "marble-1.1": 1600,
+    "marble-1.1-plus": 3100,
+}
 
 
 class SpendingLimitError(Exception):
@@ -22,6 +29,12 @@ class SpendingLimitError(Exception):
 
 def credits_to_usd(credits: float) -> float:
     return credits / CREDITS_PER_USD
+
+
+def estimate_credits(model: str, photo_count: int) -> int:
+    if photo_count == 1:
+        return ESTIMATED_CREDITS_FROM_PHOTO[model]
+    return ESTIMATED_CREDITS_FROM_PHOTOS[model]
 
 
 class CostLog:

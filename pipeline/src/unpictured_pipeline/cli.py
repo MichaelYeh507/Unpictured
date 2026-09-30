@@ -18,13 +18,15 @@ from unpictured_pipeline.spending import (
     SpendingLimitError,
     check_daily_cap,
     credits_to_usd,
+    estimate_credits,
 )
-from unpictured_pipeline.world_package import write_package
+from unpictured_pipeline.world_package import source_photo_name, write_package
 from unpictured_pipeline.worldlabs import API_BASE_URL, WorldLabsClient, WorldLabsError
 
 DEFAULT_MODEL = "marble-1.0-draft"
 DEFAULT_DAILY_CAP_USD = 3.0
 MAX_UPLOAD_BYTES = 20_000_000
+MAX_PHOTOS = 4  # the World API's limit for photos placed by direction
 PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 PACKAGE_NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
 POLL_SECONDS = 5
@@ -79,9 +81,17 @@ def build_parser() -> argparse.ArgumentParser:
     credits.set_defaults(run=run_credits)
 
     generate = commands.add_parser(
-        "generate", help="generate a world from a photo (a dry run unless --yes)"
+        "generate", help="generate a world from 1 to 4 photos (a dry run unless --yes)"
     )
-    generate.add_argument("photo", type=Path)
+    generate.add_argument("photos", nargs="+", type=Path, metavar="photo")
+    generate.add_argument(
+        "--azimuth",
+        type=float,
+        action="append",
+        default=[],
+        help="with 2 to 4 photos, each photo's direction in degrees, in the same order "
+        "(0 front, 90 right, 180 back, 270 left)",
+    )
     generate.add_argument(
         "--model", choices=sorted(ESTIMATED_CREDITS_FROM_PHOTO), default=DEFAULT_MODEL
     )
@@ -97,7 +107,20 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--world", help="world ID")
     source.add_argument("--operation", help="operation ID printed by generate")
     fetch.add_argument("--name", required=True, help="package folder name")
-    fetch.add_argument("--photo", type=Path, help="source photo to add to the package")
+    fetch.add_argument(
+        "--photo",
+        type=Path,
+        action="append",
+        default=[],
+        help="source photo to add to the package; repeat it for each photo, in order",
+    )
+    fetch.add_argument(
+        "--azimuth",
+        type=float,
+        action="append",
+        default=[],
+        help="each photo's direction, as it was given to generate",
+    )
     fetch.add_argument("--worlds-dir", type=Path)
     fetch.set_defaults(run=run_fetch)
     return parser
@@ -110,14 +133,15 @@ def run_credits(args: argparse.Namespace) -> int:
 
 
 def run_generate(args: argparse.Namespace) -> int:
-    photo = check_photo(args.photo)
+    photos = [check_photo(photo) for photo in args.photos]
+    azimuths = check_azimuths(photos, args.azimuth)
     worlds_dir = args.worlds_dir or default_worlds_dir()
-    name = check_name(args.name or default_package_name(photo, args.model))
+    name = check_name(args.name or default_package_name(photos[0], args.model))
     destination = worlds_dir / name
     if destination.exists():
         raise UsageError(f"{destination} already exists; choose another --name")
 
-    estimated_credits = ESTIMATED_CREDITS_FROM_PHOTO[args.model]
+    estimated_credits = estimate_credits(args.model, len(photos))
     cap_usd = daily_cap_usd()
     cost_log = CostLog(cost_log_path())
     today = datetime.now().astimezone().date()
@@ -126,11 +150,13 @@ def run_generate(args: argparse.Namespace) -> int:
     remaining = client.get_credits()
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        upload = prepare_upload(photo, Path(temp_dir))
-        print(
-            f"Photo:   {photo.name}, uploaded as a {upload.stat().st_size / 1e6:.1f} MB "
-            "JPEG with its metadata removed"
-        )
+        uploads = prepare_uploads(photos, Path(temp_dir))
+        for index, photo in enumerate(photos):
+            direction = "" if azimuths is None else f" at azimuth {azimuths[index]:g}"
+            print(
+                f"Photo:   {photo.name}{direction}, uploaded as a "
+                f"{uploads[index].stat().st_size / 1e6:.1f} MB JPEG with its metadata removed"
+            )
         print(
             f"Model:   {args.model}, about {estimated_credits:,} credits "
             f"(${credits_to_usd(estimated_credits):.2f})"
@@ -144,10 +170,17 @@ def run_generate(args: argparse.Namespace) -> int:
             return 0
 
         check_daily_cap(cost_log, estimated_credits, cap_usd, today)
-        media_asset_id = client.upload_image(upload)
+        media_asset_ids = [client.upload_image(upload) for upload in uploads]
         seed = random.randrange(2**31)
         operation_id = start_generation_logged(
-            client, cost_log, media_asset_id, args.model, name, seed, estimated_credits
+            client,
+            cost_log,
+            media_asset_ids,
+            azimuths,
+            args.model,
+            name,
+            seed,
+            estimated_credits,
         )
         print("Drafts take about 20 seconds, standard worlds about 5 minutes.")
         world_id = None
@@ -159,7 +192,8 @@ def run_generate(args: argparse.Namespace) -> int:
             write_package(
                 world,
                 destination,
-                source_photo=upload,
+                source_photos=uploads,
+                photo_azimuths=azimuths,
                 operation_id=operation_id,
                 seed=seed,
                 credits=credits,
@@ -167,7 +201,7 @@ def run_generate(args: argparse.Namespace) -> int:
         except GenerationFailedError:
             raise
         except BaseException:  # also Ctrl-C: the generation carries on without us
-            print_fetch_hint(photo, name, args.worlds_dir, operation_id, world_id)
+            print_fetch_hint(photos, azimuths, name, args.worlds_dir, operation_id, world_id)
             raise
     print_package_summary(destination, world, credits)
     return 0
@@ -178,7 +212,8 @@ def run_fetch(args: argparse.Namespace) -> int:
     destination = worlds_dir / check_name(args.name)
     if destination.exists():
         raise UsageError(f"{destination} already exists; choose another --name")
-    photo = check_photo(args.photo) if args.photo else None
+    photos = [check_photo(photo) for photo in args.photo]
+    azimuths = check_azimuths(photos, args.azimuth)
     client = api_client()
     credits = None
     if args.operation:
@@ -189,11 +224,11 @@ def run_fetch(args: argparse.Namespace) -> int:
         world_id = args.world
     world = client.get_world(world_id)
     with tempfile.TemporaryDirectory() as temp_dir:
-        clean_photo = prepare_upload(photo, Path(temp_dir)) if photo else None
         write_package(
             world,
             destination,
-            source_photo=clean_photo,
+            source_photos=prepare_uploads(photos, Path(temp_dir)),
+            photo_azimuths=azimuths,
             operation_id=args.operation,
             credits=credits,
         )
@@ -201,25 +236,29 @@ def run_fetch(args: argparse.Namespace) -> int:
     return 0
 
 
-def prepare_upload(photo: Path, temp_dir: Path) -> Path:
-    """The upload and the package's source photo are this cleaned copy, never the original."""
-    upload = write_clean_copy(photo, temp_dir / "source.jpg")
-    if upload.stat().st_size >= MAX_UPLOAD_BYTES:
-        raise UsageError(f"{photo.name} is still over the API's 20 MB limit as a JPEG")
-    return upload
+def prepare_uploads(photos: list[Path], temp_dir: Path) -> list[Path]:
+    """The uploads and the package's source photos are these cleaned copies, never the originals."""
+    uploads = []
+    for index, photo in enumerate(photos, start=1):
+        upload = write_clean_copy(photo, temp_dir / source_photo_name(index, len(photos)))
+        if upload.stat().st_size >= MAX_UPLOAD_BYTES:
+            raise UsageError(f"{photo.name} is still over the API's 20 MB limit as a JPEG")
+        uploads.append(upload)
+    return uploads
 
 
 def start_generation_logged(
     client: WorldLabsClient,
     cost_log: CostLog,
-    media_asset_id: str,
+    media_asset_ids: list[str],
+    azimuths: list[float] | None,
     model: str,
     name: str,
     seed: int,
     estimated_credits: float,
 ) -> str:
     try:
-        reply = client.start_generation(media_asset_id, model, name, seed)
+        reply = client.start_generation(media_asset_ids, azimuths, model, name, seed)
         operation_id = reply.get("operation_id")
         if not operation_id:
             raise WorldLabsError("The reply has no operation ID.")
@@ -286,13 +325,22 @@ def record_settled_cost(cost_log: CostLog, operation: dict) -> float | None:
 
 
 def print_fetch_hint(
-    photo: Path, name: str, worlds_dir: Path | None, operation_id: str, world_id: str | None
+    photos: list[Path],
+    azimuths: list[float] | None,
+    name: str,
+    worlds_dir: Path | None,
+    operation_id: str,
+    world_id: str | None,
 ) -> None:
     if world_id:
         state, source = "was generated and billed", f"--world {world_id}"
     else:
         state, source = "was started and will be billed", f"--operation {operation_id}"
-    command = f'python -m unpictured_pipeline fetch {source} --name {name} --photo "{photo}"'
+    command = f"python -m unpictured_pipeline fetch {source} --name {name}"
+    for photo in photos:
+        command += f' --photo "{photo}"'
+    for azimuth in azimuths or []:
+        command += f" --azimuth {azimuth:g}"
     if worlds_dir:
         command += f' --worlds-dir "{worlds_dir}"'
     print(
@@ -348,6 +396,28 @@ def check_photo(photo: Path) -> Path:
             "(convert HEIC photos to JPG first)"
         )
     return photo
+
+
+def check_azimuths(photos: list[Path], azimuths: list[float]) -> list[float] | None:
+    """One photo takes no direction; two to four photos take one --azimuth each, in order."""
+    if len(photos) > MAX_PHOTOS:
+        raise UsageError(f"{len(photos)} photos: the World API takes at most {MAX_PHOTOS}")
+    if len(photos) <= 1:
+        if azimuths:
+            raise UsageError("--azimuth is only for two or more photos")
+        return None
+    if len(azimuths) != len(photos):
+        raise UsageError(
+            f"{len(photos)} photos need {len(photos)} --azimuth values, one per photo in "
+            f"order, not {len(azimuths)}"
+        )
+    for azimuth in azimuths:
+        if not 0 <= azimuth < 360:
+            raise UsageError(
+                f"--azimuth {azimuth:g}: use degrees from 0 up to 360 "
+                "(0 front, 90 right, 180 back, 270 left)"
+            )
+    return azimuths
 
 
 def check_name(name: str) -> str:

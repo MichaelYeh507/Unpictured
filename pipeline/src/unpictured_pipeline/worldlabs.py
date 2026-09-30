@@ -59,18 +59,19 @@ class WorldLabsClient:
         return prepared["media_asset"]["media_asset_id"]
 
     def start_generation(
-        self, media_asset_id: str, model: str, display_name: str, seed: int
+        self,
+        media_asset_ids: list[str],
+        azimuths: list[float] | None,
+        model: str,
+        display_name: str,
+        seed: int,
     ) -> dict:
         body = {
             "display_name": display_name[:64],
             "model": model,
             "seed": seed,
             "permission": {"public": False, "allow_id_access": False},
-            "world_prompt": {
-                "type": "image",
-                "image_prompt": {"source": "media_asset", "media_asset_id": media_asset_id},
-                "is_pano": False,
-            },
+            "world_prompt": _world_prompt(media_asset_ids, azimuths),
         }
         return self._call("POST", "/marble/v1/worlds:generate", body)
 
@@ -94,6 +95,23 @@ class WorldLabsClient:
                 return json.load(response)
             except (OSError, http.client.HTTPException, ValueError) as error:
                 raise WorldLabsError(f"Unreadable reply from {method} {path}: {error}") from None
+
+
+def _world_prompt(media_asset_ids: list[str], azimuths: list[float] | None) -> dict:
+    """One photo, or several placed by direction (0 front, 90 right, 180 back, 270 left)."""
+    if azimuths is None:
+        [media_asset_id] = media_asset_ids
+        return {
+            "type": "image",
+            "image_prompt": {"source": "media_asset", "media_asset_id": media_asset_id},
+            "is_pano": False,
+        }
+    images = [
+        {"azimuth": azimuth, "content": {"source": "media_asset", "media_asset_id": asset_id}}
+        for asset_id, azimuth in zip(media_asset_ids, azimuths, strict=True)
+    ]
+    # Explicit, so a change of default can't switch Marble to placing the photos itself.
+    return {"type": "multi-image", "multi_image_prompt": images, "reconstruct_images": False}
 
 
 def download(url: str, destination: Path, timeout_seconds: float = 300) -> None:
