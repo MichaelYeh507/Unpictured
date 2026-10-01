@@ -2,6 +2,7 @@ import { SparkControls, SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
 import {
   isWorldName,
   parseWorldMeta,
+  pickSplatFile,
   placeWorld,
   sourceCameraPosition,
   type WorldPlacement,
@@ -64,10 +65,8 @@ async function loadWorld(): Promise<void> {
     throw new Error(`worlds/${name}/meta.json: HTTP ${response.status}`);
   }
   const meta = parseWorldMeta(await response.json());
-  const splatFile = meta.files.splats_500k;
-  if (splatFile === undefined) {
-    throw new Error("meta.json lists no splats_500k file");
-  }
+  const splatFile = pickSplatFile(meta);
+  statusLine.textContent = `Loading ${name} (${splatFile})...`;
 
   const placement = placeWorld(meta.frame);
   if (!placement.metric) {
@@ -82,7 +81,7 @@ async function loadWorld(): Promise<void> {
   camera.position.set(...sourceCameraPosition(placement));
 
   await splats.initialized;
-  statusLine.textContent = `${name}: drag to look, W A S D to move, E up, Q down`;
+  statusLine.textContent = `${name} (${splatFile}): drag to look, W A S D to move, E up, Q down`;
 }
 
 function applyPlacement(object: THREE.Object3D, placement: WorldPlacement): void {
