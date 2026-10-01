@@ -3,7 +3,18 @@ from datetime import date
 
 import pytest
 
-from unpictured_pipeline.spending import CostLog, SpendingLimitError, check_daily_cap
+from unpictured_pipeline.spending import (
+    ESTIMATED_CREDITS_FROM_PHOTO,
+    ESTIMATED_CREDITS_FROM_PHOTOS,
+    CostLog,
+    SpendingLimitError,
+    check_daily_cap,
+)
+
+
+def test_every_model_has_a_price_for_one_photo_and_for_several():
+    # --model choices come from the one-photo table, so the other must cover them too.
+    assert ESTIMATED_CREDITS_FROM_PHOTOS.keys() == ESTIMATED_CREDITS_FROM_PHOTO.keys()
 
 
 def test_spend_prefers_settled_cost_and_counts_only_that_day(tmp_path):

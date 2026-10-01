@@ -35,6 +35,13 @@ uv run --env-file <key file> python -m unpictured_pipeline generate photo.jpg   
 uv run --env-file <key file> python -m unpictured_pipeline generate photo.jpg --yes
 ```
 
+Two to four photos of one place make a single world. Give each photo's direction in the same
+order (0 front, 90 right, 180 back, 270 left):
+
+```
+uv run --env-file <key file> python -m unpictured_pipeline generate front.jpg back.jpg --azimuth 0 --azimuth 180
+```
+
 To walk around a world, run `npm run dev` and open `http://localhost:5173/?world=<name>`, where
 `<name>` is a folder in `worlds/`. Drag to look, W A S D to move, E up, Q down. Draft worlds have
 no metric data, so they show at raw scale with a notice on screen.
