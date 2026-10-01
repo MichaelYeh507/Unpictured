@@ -1,6 +1,8 @@
 import { SparkControls, SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
 import {
   isWorldName,
+  type PhotoCamera,
+  parseCameraFile,
   parseWorldMeta,
   pickSplatFile,
   placeWorld,
@@ -8,6 +10,7 @@ import {
   type WorldPlacement,
 } from "@unpictured/core";
 import * as THREE from "three";
+import { buildPhotoFrame, fieldOfViewFor } from "./photoFrames.ts";
 
 const statusLine = requireElement("status");
 const positionLine = requireElement("position");
@@ -80,8 +83,44 @@ async function loadWorld(): Promise<void> {
   scene.add(splats);
   camera.position.set(...sourceCameraPosition(placement));
 
+  const photoCameras = await loadPhotoCameras(name);
+  const frames = photoCameras.map((photoCamera) =>
+    buildPhotoFrame(photoCamera, placement, `/worlds/${name}/${photoCamera.photo}`),
+  );
+  for (const frame of frames) {
+    scene.add(frame.outline, frame.overlay);
+  }
+  const [firstCamera] = photoCameras;
+  const [firstFrame] = frames;
+  if (firstCamera !== undefined && firstFrame !== undefined) {
+    // Start looking through the first photo, with all of it on screen.
+    camera.fov = fieldOfViewFor(firstCamera, camera.aspect);
+    camera.updateProjectionMatrix();
+    camera.lookAt(firstFrame.center);
+  }
+  window.addEventListener("keydown", (event) => {
+    if (event.code === "KeyO") {
+      for (const frame of frames) {
+        frame.overlay.visible = !frame.overlay.visible;
+      }
+    }
+  });
+
   await splats.initialized;
-  statusLine.textContent = `${name} (${splatFile}): drag to look, W A S D to move, E up, Q down`;
+  const photoHint = frames.length > 0 ? ", O shows the photo in its frame" : "";
+  statusLine.textContent = `${name} (${splatFile}): drag to look, W A S D to move, E up, Q down${photoHint}`;
+}
+
+/** The world's camera.json, or no cameras when `locate` has not been run for it. */
+async function loadPhotoCameras(name: string): Promise<PhotoCamera[]> {
+  const response = await fetch(`/worlds/${name}/camera.json`);
+  if (response.status === 404) {
+    return [];
+  }
+  if (!response.ok) {
+    throw new Error(`worlds/${name}/camera.json: HTTP ${response.status}`);
+  }
+  return parseCameraFile(await response.json());
 }
 
 function applyPlacement(object: THREE.Object3D, placement: WorldPlacement): void {

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Tools that generate and prepare Unpictured world packages."
 requires-python = ">=3.12"
 dependencies = [
+    "numpy==2.5.3",
     "pillow==12.3.0",
 ]
 
