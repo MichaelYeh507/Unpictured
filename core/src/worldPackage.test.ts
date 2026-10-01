@@ -58,6 +58,16 @@ test("picks the most detailed splat file", () => {
   expect(pickSplatFile(parseWorldMeta(draftMeta()))).toBe("splats.spz");
 });
 
+test("picks by detail, not by the order meta.json lists the files", () => {
+  const smallestFirst = {
+    splats_100k: "splats_100k.spz",
+    splats_500k: "splats_500k.spz",
+    splats_full_res: "splats.spz",
+  };
+
+  expect(pickSplatFile(metaWithSplats(smallestFirst))).toBe("splats.spz");
+});
+
 test("falls back to fewer splats when a package lacks the full file", () => {
   const withoutFullRes = { splats_500k: "splats_500k.spz", splats_100k: "splats_100k.spz" };
   const onlySmallest = { splats_100k: "splats_100k.spz" };
