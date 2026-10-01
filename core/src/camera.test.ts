@@ -68,6 +68,12 @@ test("a camera turned right sees a frame on its right, at twice the depth", () =
   expectClose(photoFrameCenter(camera({ yawDeg: 90 }), 2), [2, 0, 0]);
 });
 
+test("uses each axis's own focal length", () => {
+  const [topLeft] = photoFrameCorners(camera({ fx: 2, fy: 4 }), 1);
+
+  expectClose(topLeft ?? [Number.NaN, 0, 0], [-1, -0.375, 1]);
+});
+
 test("the frame moves with the camera's position", () => {
   expectClose(photoFrameCenter(camera({ position: [0.5, -1, 2] }), 1), [0.5, -1, 3]);
 });
