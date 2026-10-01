@@ -6,6 +6,8 @@ import type { FrameMetadata } from "./frames.ts";
 const WORLD_NAME = /^[a-z0-9][a-z0-9-]*$/;
 /** A plain file name: no folders, and it cannot start with a dot. */
 const FILE_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
+/** Splat file roles from most to least detail. */
+const SPLAT_ROLES = ["splats_full_res", "splats_500k", "splats_100k"];
 
 export interface WorldMeta {
   worldId: string;
@@ -41,6 +43,17 @@ export function parseWorldMeta(json: unknown): WorldMeta {
     },
     files: checkedFiles,
   };
+}
+
+/** The most detailed splat file the package has. */
+export function pickSplatFile(meta: WorldMeta): string {
+  for (const role of SPLAT_ROLES) {
+    const fileName = meta.files[role];
+    if (fileName !== undefined) {
+      return fileName;
+    }
+  }
+  throw new Error(`meta.json lists no splat file (${SPLAT_ROLES.join(", ")})`);
 }
 
 /** Splits "/worlds/<name>/<file>" into its parts, or returns null for any other path. */

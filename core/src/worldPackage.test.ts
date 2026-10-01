@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { isWorldName, parseWorldFilePath, parseWorldMeta } from "./worldPackage.ts";
+import { isWorldName, parseWorldFilePath, parseWorldMeta, pickSplatFile } from "./worldPackage.ts";
 
 /** The shape the pipeline wrote for the first real draft (2026-09-29), shortened. */
 function draftMeta(): Record<string, unknown> {
@@ -10,8 +10,19 @@ function draftMeta(): Record<string, unknown> {
     frame: "marble_raw_opencv",
     metric_scale_factor: null,
     ground_plane_offset: null,
-    files: { splats_500k: "splats_500k.spz", pano: "pano.png", source_photo: "source.jpg" },
+    files: {
+      splats_full_res: "splats.spz",
+      splats_500k: "splats_500k.spz",
+      splats_100k: "splats_100k.spz",
+      pano: "pano.png",
+      source_photo: "source.jpg",
+    },
   };
+}
+
+/** A parsed package that has only the given splat files. */
+function metaWithSplats(files: Record<string, string>) {
+  return parseWorldMeta({ ...draftMeta(), files: { pano: "pano.png", ...files } });
 }
 
 test("reads a draft's meta.json", () => {
@@ -41,6 +52,22 @@ test.each([
   ["files that are not an object", { files: ["splats.spz"] }, "files is not an object"],
 ])("refuses %s", (_label, change, message) => {
   expect(() => parseWorldMeta({ ...draftMeta(), ...change })).toThrow(message);
+});
+
+test("picks the most detailed splat file", () => {
+  expect(pickSplatFile(parseWorldMeta(draftMeta()))).toBe("splats.spz");
+});
+
+test("falls back to fewer splats when a package lacks the full file", () => {
+  const withoutFullRes = { splats_500k: "splats_500k.spz", splats_100k: "splats_100k.spz" };
+  const onlySmallest = { splats_100k: "splats_100k.spz" };
+
+  expect(pickSplatFile(metaWithSplats(withoutFullRes))).toBe("splats_500k.spz");
+  expect(pickSplatFile(metaWithSplats(onlySmallest))).toBe("splats_100k.spz");
+});
+
+test("refuses a package with no splat file", () => {
+  expect(() => pickSplatFile(metaWithSplats({}))).toThrow("lists no splat file");
 });
 
 test("world names follow the pipeline's --name rule", () => {
