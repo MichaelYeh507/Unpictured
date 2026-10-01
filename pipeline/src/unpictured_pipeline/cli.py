@@ -11,7 +11,6 @@ from datetime import datetime
 from importlib.metadata import version
 from pathlib import Path
 
-from unpictured_pipeline.locate import WEAK_MATCH_SCORE, LocateError, write_camera_file
 from unpictured_pipeline.photos import PhotoError, write_clean_copy
 from unpictured_pipeline.spending import (
     ESTIMATED_CREDITS_FROM_PHOTO,
@@ -57,7 +56,6 @@ def main(argv: list[str] | None = None) -> int:
         WorldLabsError,
         GenerationFailedError,
         FileExistsError,
-        LocateError,
     ) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -246,12 +244,19 @@ def run_fetch(args: argparse.Namespace) -> int:
 
 
 def run_locate(args: argparse.Namespace) -> int:
+    # Imported here so numpy loads only for this command, never for generate or fetch.
+    from unpictured_pipeline.locate import WEAK_MATCH_SCORE, LocateError, write_camera_file
+
     worlds_dir = args.worlds_dir or default_worlds_dir()
     package = worlds_dir / check_name(args.name)
     if not (package / "meta.json").is_file():
         raise UsageError(f"{package} has no meta.json")
     print("Matching each photo against the panorama (about 10 seconds per photo)...")
-    for camera in write_camera_file(package):
+    try:
+        cameras = write_camera_file(package)
+    except LocateError as error:
+        raise UsageError(str(error)) from None
+    for camera in cameras:
         print(
             f"{camera['photo']}: turned {camera['yaw_deg']:g}, tilted {camera['pitch_deg']:g}, "
             f"{camera['hfov_deg']:g} degrees wide (match {camera['match_score']:.2f})"

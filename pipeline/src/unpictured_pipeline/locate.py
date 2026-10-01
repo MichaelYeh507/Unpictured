@@ -6,6 +6,7 @@ edges correlate best with the photo's edges.
 """
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,8 @@ FINE_WIDTH = 160  # and for the two finer searches around the best coarse match
 # Measured 2026-10-01: real photos matched at 0.62 to 0.87, the same photos searched in the
 # wrong place at 0.18 to 0.23, and random noise at 0.05.
 WEAK_MATCH_SCORE = 0.4
+# The same rule as core/src/worldPackage.ts: no folders, and no leading dot.
+PLAIN_FILE_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
 
 
 class LocateError(Exception):
@@ -84,10 +87,9 @@ def locate_photo(pano: np.ndarray, photo: Image.Image, yaw_center: float) -> Pla
 
 def write_camera_file(package: Path) -> list[dict]:
     """Locates every source photo listed in the package's meta.json and writes camera.json."""
-    meta = json.loads((package / "meta.json").read_text(encoding="utf-8"))
-    files = meta.get("files", {})
+    files, azimuths = _read_meta(package)
     photos = _source_photos(files)
-    azimuths = meta.get("photo_azimuths") or [0.0] * len(photos)
+    azimuths = azimuths or [0.0] * len(photos)
     if not photos:
         raise LocateError(f"{package.name} has no source photo; fetch it again with --photo")
     if len(azimuths) != len(photos):
@@ -95,12 +97,14 @@ def write_camera_file(package: Path) -> list[dict]:
     if "pano" not in files:
         raise LocateError(f"{package.name} has no panorama to match against")
 
-    pano = load_pano(package / files["pano"])
-    cameras = []
-    for file_name, azimuth in zip(photos, azimuths, strict=True):
-        with Image.open(package / file_name) as photo:
-            placement = locate_photo(pano, photo, azimuth)
-            cameras.append(_camera_entry(file_name, placement, photo.size))
+    try:
+        pano = load_pano(package / files["pano"])
+        cameras = [
+            _locate_file(pano, package / file_name, azimuth)
+            for file_name, azimuth in zip(photos, azimuths, strict=True)
+        ]
+    except OSError as error:  # a missing or unreadable image
+        raise LocateError(f"could not read an image in {package.name}: {error}") from None
     camera_file = {
         "format": "provisional-m0",
         "frame": "marble_raw_opencv",
@@ -114,6 +118,32 @@ def write_camera_file(package: Path) -> list[dict]:
     text = json.dumps(camera_file, indent=2) + "\n"
     (package / "camera.json").write_text(text, encoding="utf-8")
     return cameras
+
+
+def _read_meta(package: Path) -> tuple[dict, list | None]:
+    """The package's files by role and its photo azimuths, checked."""
+    try:
+        meta = json.loads((package / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise LocateError(f"could not read {package.name}/meta.json: {error}") from None
+    files = meta.get("files") if isinstance(meta, dict) else None
+    if not isinstance(files, dict):
+        raise LocateError("meta.json has no files")
+    for role, file_name in files.items():
+        if not isinstance(file_name, str) or not PLAIN_FILE_NAME.fullmatch(file_name):
+            raise LocateError(f"meta.json: files.{role} is not a plain file name")
+    azimuths = meta.get("photo_azimuths")
+    is_number_list = isinstance(azimuths, list) and all(
+        isinstance(azimuth, int | float) for azimuth in azimuths
+    )
+    if azimuths is not None and not is_number_list:
+        raise LocateError("meta.json: photo_azimuths must be a list of numbers")
+    return files, azimuths
+
+
+def _locate_file(pano: np.ndarray, path: Path, azimuth: float) -> dict:
+    with Image.open(path) as photo:
+        return _camera_entry(path.name, locate_photo(pano, photo, azimuth), photo.size)
 
 
 def _source_photos(files: dict) -> list[str]:

@@ -50,8 +50,7 @@ renderer.setAnimationLoop(() => {
 });
 
 loadWorld().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  statusLine.textContent = `Could not load the world: ${message}`;
+  statusLine.textContent = `Could not load the world: ${errorMessage(error)}`;
 });
 
 async function loadWorld(): Promise<void> {
@@ -83,7 +82,14 @@ async function loadWorld(): Promise<void> {
   scene.add(splats);
   camera.position.set(...sourceCameraPosition(placement));
 
-  const photoCameras = await loadPhotoCameras(name);
+  let photoCameras: PhotoCamera[] = [];
+  try {
+    photoCameras = await loadPhotoCameras(name);
+  } catch (error) {
+    // The world still works without its photo frames.
+    const problem = `Photo frames unavailable: ${errorMessage(error)}`;
+    noticeLine.textContent = `${noticeLine.textContent} ${problem}`.trim();
+  }
   const frames = photoCameras.map((photoCamera) =>
     buildPhotoFrame(photoCamera, placement, `/worlds/${name}/${photoCamera.photo}`),
   );
@@ -127,6 +133,10 @@ function applyPlacement(object: THREE.Object3D, placement: WorldPlacement): void
   object.scale.setScalar(placement.scale);
   object.quaternion.set(...placement.quaternion);
   object.position.set(...placement.position);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function requireElement(id: string): HTMLElement {

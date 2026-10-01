@@ -57,18 +57,19 @@ def test_views_sample_the_panorama_where_the_camera_points():
     assert sampled(columns, 0, 0)[10, 10] == pytest.approx(180, abs=1)  # ahead: middle column
     assert sampled(columns, 90, 0)[10, 10] == pytest.approx(270, abs=1)  # right: 3/4 across
     assert sampled(rows, 0, 30)[10, 10] == pytest.approx(60, abs=1)  # 30 up: row 90 - 30
+    assert sampled(rows, 0, 0)[0, 10] == pytest.approx(61, abs=1)  # top edge: about 29 up
     assert sampled(columns, 0, 0)[10, 0] == pytest.approx(152, abs=1)  # left edge: about 28 left
     behind = sampled(columns, 180, 0)[10, 10]
     assert behind < 2 or behind > 357  # straight behind wraps around the seam
 
 
-def test_finds_a_photo_cut_from_a_known_place():
+def test_finds_a_photo_cut_from_a_known_place_across_the_seam():
     pano = textured_pano(seed=1)
-    photo = photo_from(pano, yaw=12, pitch=-8, hfov=75)
+    photo = photo_from(pano, yaw=355, pitch=-8, hfov=75)
 
     found = locate.locate_photo(pano, photo, yaw_center=0)
 
-    assert found.yaw == pytest.approx(12, abs=0.5)
+    assert found.yaw == pytest.approx(355, abs=0.5)  # reported as 355, not -5
     assert found.pitch == pytest.approx(-8, abs=0.5)
     assert found.hfov == pytest.approx(75, abs=1)
     assert found.score > 0.8
@@ -109,23 +110,57 @@ def test_a_photo_that_is_not_in_the_panorama_gets_a_warning(tmp_path, capsys):
     assert "source.jpg matched weakly" in capsys.readouterr().err
 
 
+def small_package(tmp_path: Path) -> Path:
+    pano = textured_pano(seed=5)
+    return write_package(tmp_path / "worlds" / "room", pano, [photo_from(pano, 0, 0, 80)], None)
+
+
+def run_locate(tmp_path: Path) -> int:
+    return main(["locate", "--name", "room", "--worlds-dir", str(tmp_path / "worlds")])
+
+
 @pytest.mark.parametrize(
     ("change", "message"),
     [
         ({"files": {"pano": "pano.png"}}, "has no source photo"),
         ({"files": {"source_photo": "source.jpg"}}, "has no panorama"),
         ({"photo_azimuths": [0, 180]}, "lists 1 photos but 2 azimuths"),
+        ({"files": None}, "meta.json has no files"),
+        ({"photo_azimuths": 5}, "photo_azimuths must be a list of numbers"),
+        ({"files": {"pano": "../pano.png"}}, "files.pano is not a plain file name"),
     ],
 )
 def test_incomplete_packages_are_refused(tmp_path, capsys, change, message):
-    pano = textured_pano(seed=5)
-    package = write_package(tmp_path / "worlds" / "room", pano, [photo_from(pano, 0, 0, 80)], None)
+    package = small_package(tmp_path)
     meta = json.loads((package / "meta.json").read_text(encoding="utf-8"))
     (package / "meta.json").write_text(json.dumps({**meta, **change}), encoding="utf-8")
 
-    assert main(["locate", "--name", "room", "--worlds-dir", str(tmp_path / "worlds")]) == 1
+    assert run_locate(tmp_path) == 1
 
     assert message in capsys.readouterr().err
+    assert not (package / "camera.json").exists()
+
+
+def test_unreadable_meta_json_is_a_clean_error(tmp_path, capsys):
+    package = small_package(tmp_path)
+    (package / "meta.json").write_text("{ not json", encoding="utf-8")
+
+    assert run_locate(tmp_path) == 1
+
+    assert "could not read room/meta.json" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("broken", ["missing", "corrupt"])
+def test_unreadable_images_are_a_clean_error(tmp_path, capsys, broken):
+    package = small_package(tmp_path)
+    if broken == "missing":
+        (package / "pano.png").unlink()
+    else:
+        (package / "source.jpg").write_bytes(b"not an image")
+
+    assert run_locate(tmp_path) == 1
+
+    assert "could not read an image in room" in capsys.readouterr().err
     assert not (package / "camera.json").exists()
 
 
