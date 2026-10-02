@@ -55,3 +55,17 @@ test("an unknown frame is refused", () => {
 
   expect(() => placeWorld(meta)).toThrow('Unknown splat frame "some_other_frame"');
 });
+
+test("toRawFrame undoes toGameFrame for any turn, not just the 180 degree one", () => {
+  // 90 degrees about y, which unlike the usual turn is not its own reverse.
+  const half = Math.SQRT1_2;
+  const placement = {
+    scale: 1.7,
+    quaternion: [0, half, 0, half] as const,
+    position: [0.3, -1.2, 2.5] as const,
+    metric: true,
+  };
+  const raw: Vec3 = [0.4, -0.7, 1.9];
+
+  expectClose(toRawFrame(toGameFrame(raw, placement), placement), raw);
+});
