@@ -123,6 +123,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fetch.add_argument("--worlds-dir", type=Path)
     fetch.set_defaults(run=run_fetch)
+
+    locate = commands.add_parser(
+        "locate", help="find where each source photo sits in its world (free, no API calls)"
+    )
+    locate.add_argument("--name", required=True, help="package folder name")
+    locate.add_argument("--worlds-dir", type=Path)
+    locate.set_defaults(run=run_locate)
     return parser
 
 
@@ -233,6 +240,34 @@ def run_fetch(args: argparse.Namespace) -> int:
             credits=credits,
         )
     print_package_summary(destination, world, credits)
+    return 0
+
+
+def run_locate(args: argparse.Namespace) -> int:
+    # Imported here so numpy loads only for this command, never for generate or fetch.
+    from unpictured_pipeline.locate import WEAK_MATCH_SCORE, LocateError, write_camera_file
+
+    worlds_dir = args.worlds_dir or default_worlds_dir()
+    package = worlds_dir / check_name(args.name)
+    if not (package / "meta.json").is_file():
+        raise UsageError(f"{package} has no meta.json")
+    print("Matching each photo against the panorama (about 10 seconds per photo)...")
+    try:
+        cameras = write_camera_file(package)
+    except LocateError as error:
+        raise UsageError(str(error)) from None
+    for camera in cameras:
+        print(
+            f"{camera['photo']}: turned {camera['yaw_deg']:g}, tilted {camera['pitch_deg']:g}, "
+            f"{camera['hfov_deg']:g} degrees wide (match {camera['match_score']:.2f})"
+        )
+        if camera["match_score"] < WEAK_MATCH_SCORE:
+            print(
+                f"warning: {camera['photo']} matched weakly; check its frame in the viewer "
+                "before relying on it",
+                file=sys.stderr,
+            )
+    print(f"Saved {package / 'camera.json'}")
     return 0
 
 

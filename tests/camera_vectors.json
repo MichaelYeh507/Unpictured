@@ -1,0 +1,52 @@
+{
+  "description": "Source-camera rays turned into the raw splat frame (marble_raw_opencv: x right, y down, z forward). A camera ray uses the same axes. Pitch tilts the camera up (toward -y) first, then yaw turns it right (from +z toward +x), so yaw matches Marble's azimuth (0 front, 90 right, 180 back, 270 left). The simple cases are worked out by hand; the last two were derived with explicit rotation matrices and checked by hand. The pipeline's photo matcher and the TypeScript core both check against this file.",
+  "cases": [
+    { "label": "straight ahead", "yaw": 0, "pitch": 0, "ray": [0, 0, 1], "raw": [0, 0, 1] },
+    { "label": "turned right", "yaw": 90, "pitch": 0, "ray": [0, 0, 1], "raw": [1, 0, 0] },
+    { "label": "turned around", "yaw": 180, "pitch": 0, "ray": [0, 0, 1], "raw": [0, 0, -1] },
+    { "label": "turned left", "yaw": 270, "pitch": 0, "ray": [0, 0, 1], "raw": [-1, 0, 0] },
+    { "label": "looking straight up", "yaw": 0, "pitch": 90, "ray": [0, 0, 1], "raw": [0, -1, 0] },
+    {
+      "label": "camera's right, facing ahead",
+      "yaw": 0,
+      "pitch": 0,
+      "ray": [1, 0, 0],
+      "raw": [1, 0, 0]
+    },
+    {
+      "label": "camera's right, turned right",
+      "yaw": 90,
+      "pitch": 0,
+      "ray": [1, 0, 0],
+      "raw": [0, 0, -1]
+    },
+    {
+      "label": "turned right, tilted up 30",
+      "yaw": 90,
+      "pitch": 30,
+      "ray": [0, 0, 1],
+      "raw": [0.866025404, -0.5, 0]
+    },
+    {
+      "label": "top-left corner ray, level",
+      "yaw": 0,
+      "pitch": 0,
+      "ray": [-1, -0.75, 1],
+      "raw": [-1, -0.75, 1]
+    },
+    {
+      "label": "off-center ray, turned 45 and tilted down 10",
+      "yaw": 45,
+      "pitch": -10,
+      "ray": [0.5, 0.25, 1],
+      "raw": [1.01922068, 0.419850116, 0.312113899]
+    },
+    {
+      "label": "off-center ray, turned 200 and tilted up 20",
+      "yaw": 200,
+      "pitch": 20,
+      "ray": [-0.3, 0.6, 1],
+      "raw": [-0.109672686, 0.221795429, -1.178464547]
+    }
+  ]
+}

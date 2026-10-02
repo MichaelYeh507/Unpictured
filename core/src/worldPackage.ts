@@ -20,6 +20,10 @@ export function isWorldName(name: string): boolean {
   return WORLD_NAME.test(name);
 }
 
+export function isPlainFileName(name: string): boolean {
+  return FILE_NAME.test(name);
+}
+
 export function parseWorldMeta(json: unknown): WorldMeta {
   const meta = asRecord(json, "meta.json");
   const files = asRecord(meta.files, "meta.json files");
