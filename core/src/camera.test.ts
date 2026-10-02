@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import vectors from "../../tests/camera_vectors.json" with { type: "json" };
 import {
+  isInPhoto,
   type PhotoCamera,
   parseCameraFile,
   photoFrameCenter,
@@ -72,6 +73,32 @@ test("uses each axis's own focal length", () => {
   const [topLeft] = photoFrameCorners(camera({ fx: 2, fy: 4 }), 1);
 
   expectClose(topLeft ?? [Number.NaN, 0, 0], [-1, -0.375, 1]);
+});
+
+describe("isInPhoto", () => {
+  // A camera turned and tilted, away from the origin, so every part of the reverse is used.
+  const turned = camera({ yawDeg: 200, pitchDeg: -25, position: [0.5, -0.2, 1] });
+  const corners = photoFrameCorners(turned, 2);
+  const center = photoFrameCenter(turned, 2);
+  const towards = (from: Vec3, to: Vec3, amount: number): Vec3 => [
+    from[0] + (to[0] - from[0]) * amount,
+    from[1] + (to[1] - from[1]) * amount,
+    from[2] + (to[2] - from[2]) * amount,
+  ];
+
+  test("the middle of the photo is in it", () => {
+    expect(isInPhoto(turned, center)).toBe(true);
+  });
+
+  test.each([0, 1, 2, 3])("just inside and just outside corner %i", (index) => {
+    const corner = corners[index] ?? center;
+    expect(isInPhoto(turned, towards(center, corner, 0.99))).toBe(true);
+    expect(isInPhoto(turned, towards(center, corner, 1.01))).toBe(false);
+  });
+
+  test("a point behind the camera is not in it, even where its ray would cross the frame", () => {
+    expect(isInPhoto(turned, towards(turned.position, center, -1))).toBe(false);
+  });
 });
 
 test("the frame moves with the camera's position", () => {

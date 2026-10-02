@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import vectors from "../../tests/frame_vectors.json" with { type: "json" };
-import { placeWorld, sourceCameraPosition, toGameFrame, type Vec3 } from "./frames.ts";
+import { placeWorld, sourceCameraPosition, toGameFrame, toRawFrame, type Vec3 } from "./frames.ts";
 
 function vec3(values: number[]): Vec3 {
   const [x, y, z] = values;
@@ -33,6 +33,10 @@ describe.each(vectors.cases)("$name", (vector) => {
 
   test.each(vector.points)("$label", ({ raw, game }) => {
     expectClose(toGameFrame(vec3(raw), placement), game);
+  });
+
+  test.each(vector.points)("$label, back to raw", ({ raw, game }) => {
+    expectClose(toRawFrame(vec3(game), placement), raw);
   });
 });
 
