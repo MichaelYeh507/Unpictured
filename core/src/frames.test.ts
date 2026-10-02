@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import vectors from "../../tests/frame_vectors.json" with { type: "json" };
-import { placeWorld, sourceCameraPosition, toGameFrame, type Vec3 } from "./frames.ts";
+import { placeWorld, sourceCameraPosition, toGameFrame, toRawFrame, type Vec3 } from "./frames.ts";
 
 function vec3(values: number[]): Vec3 {
   const [x, y, z] = values;
@@ -34,6 +34,10 @@ describe.each(vectors.cases)("$name", (vector) => {
   test.each(vector.points)("$label", ({ raw, game }) => {
     expectClose(toGameFrame(vec3(raw), placement), game);
   });
+
+  test.each(vector.points)("$label, back to raw", ({ raw, game }) => {
+    expectClose(toRawFrame(vec3(game), placement), raw);
+  });
 });
 
 test("the source camera starts at the placement's position", () => {
@@ -50,4 +54,18 @@ test("an unknown frame is refused", () => {
   const meta = { frame: "some_other_frame", metricScaleFactor: 1, groundPlaneOffset: 0 };
 
   expect(() => placeWorld(meta)).toThrow('Unknown splat frame "some_other_frame"');
+});
+
+test("toRawFrame undoes toGameFrame for any turn, not just the 180 degree one", () => {
+  // 90 degrees about y, which unlike the usual turn is not its own reverse.
+  const half = Math.SQRT1_2;
+  const placement = {
+    scale: 1.7,
+    quaternion: [0, half, 0, half] as const,
+    position: [0.3, -1.2, 2.5] as const,
+    metric: true,
+  };
+  const raw: Vec3 = [0.4, -0.7, 1.9];
+
+  expectClose(toRawFrame(toGameFrame(raw, placement), placement), raw);
 });

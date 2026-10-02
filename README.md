@@ -53,7 +53,9 @@ To walk around a world, run `npm run dev` and open `http://localhost:5173/?world
 `<name>` is a folder in `worlds/`. Drag to look, W A S D to move, E up, Q down. The viewer loads
 the most detailed splat file the world has. Draft worlds have no metric data, so they show at raw
 scale with a notice on screen. When a world has `camera.json`, the viewer draws each photo's frame
-in yellow, starts looking through the first photo, and O lays the photo over the world.
+in yellow, starts looking through the first photo, and O lays the photo over the world. N measures
+where a person can walk from the photo spot and colors that floor: blue inside a photo, pink
+unpictured, gray out of reach, with the areas on screen.
 
 `generate` defaults to the cheap draft model and refuses to pass a daily cap
 (`UNPICTURED_DAILY_CAP_USD`, default $3). Every paid call is logged to one file per user,

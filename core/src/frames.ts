@@ -60,7 +60,19 @@ export function toGameFrame(rawPoint: Vec3, placement: WorldPlacement): Vec3 {
   return [x + px, y + py, z + pz];
 }
 
-/** Marble's panorama camera sits at the raw origin (to be confirmed in M0). */
+/** The reverse of toGameFrame: a game point back in the raw splat frame. */
+export function toRawFrame(gamePoint: Vec3, placement: WorldPlacement): Vec3 {
+  const [px, py, pz] = placement.position;
+  const [qx, qy, qz, qw] = placement.quaternion;
+  const [x, y, z] = rotate(
+    [-qx, -qy, -qz, qw],
+    [gamePoint[0] - px, gamePoint[1] - py, gamePoint[2] - pz],
+  );
+  const s = placement.scale;
+  return [x / s, y / s, z / s];
+}
+
+/** Marble's panorama camera sits at the raw origin (checked in M0: photos line up from there). */
 export function sourceCameraPosition(placement: WorldPlacement): Vec3 {
   return toGameFrame([0, 0, 0], placement);
 }

@@ -71,6 +71,33 @@ export function rotateCameraRay(yawDeg: number, pitchDeg: number, [x, y, z]: Vec
   ];
 }
 
+/** Whether a raw-frame point falls inside the photo's frame (what it hides is not considered). */
+export function isInPhoto(camera: PhotoCamera, rawPoint: Vec3): boolean {
+  const [x, y, z] = toCameraRay(camera, rawPoint);
+  if (z <= 0) {
+    return false;
+  }
+  const [width, height] = camera.imageSize;
+  const u = camera.cx + (camera.fx * x) / z;
+  const v = camera.cy + (camera.fy * y) / z;
+  return u >= 0 && u <= width && v >= 0 && v <= height;
+}
+
+/** The reverse of rotateCameraRay, from the camera's position: turn back by yaw, then by pitch. */
+function toCameraRay(camera: PhotoCamera, rawPoint: Vec3): Vec3 {
+  const [px, py, pz] = camera.position;
+  const [x, y, z] = [rawPoint[0] - px, rawPoint[1] - py, rawPoint[2] - pz];
+  const tilt = (camera.pitchDeg * Math.PI) / 180;
+  const turn = (camera.yawDeg * Math.PI) / 180;
+  const unturnedX = x * Math.cos(turn) - z * Math.sin(turn);
+  const unturnedZ = x * Math.sin(turn) + z * Math.cos(turn);
+  return [
+    unturnedX,
+    y * Math.cos(tilt) + unturnedZ * Math.sin(tilt),
+    -y * Math.sin(tilt) + unturnedZ * Math.cos(tilt),
+  ];
+}
+
 /** The photo's corners `depth` in front of its camera: top-left, top-right, bottom-right, bottom-left. */
 export function photoFrameCorners(camera: PhotoCamera, depth: number): Vec3[] {
   const [width, height] = camera.imageSize;

@@ -3,6 +3,7 @@ import {
   isWorldName,
   type PhotoCamera,
   parseCameraFile,
+  parseGlbMesh,
   parseWorldMeta,
   pickSplatFile,
   placeWorld,
@@ -11,10 +12,12 @@ import {
 } from "@unpictured/core";
 import * as THREE from "three";
 import { buildPhotoFrame, fieldOfViewFor } from "./photoFrames.ts";
+import { buildFloorOverlay, describeFloor } from "./walkableFloor.ts";
 
 const statusLine = requireElement("status");
 const positionLine = requireElement("position");
 const noticeLine = requireElement("notice");
+const walkableLine = requireElement("walkable");
 
 // Spark renders splats without MSAA.
 const renderer = new THREE.WebGLRenderer({ antialias: false });
@@ -104,17 +107,76 @@ async function loadWorld(): Promise<void> {
     camera.updateProjectionMatrix();
     camera.lookAt(firstFrame.center);
   }
+  const colliderFile = meta.files.collider;
+  const walkable = new WalkableFloorToggle(
+    `/worlds/${name}/${colliderFile}`,
+    placement,
+    photoCameras,
+  );
   window.addEventListener("keydown", (event) => {
     if (event.code === "KeyO") {
       for (const frame of frames) {
         frame.overlay.visible = !frame.overlay.visible;
       }
     }
+    if (event.code === "KeyN" && colliderFile !== undefined) {
+      void walkable.toggle();
+    }
   });
 
   await splats.initialized;
   const photoHint = frames.length > 0 ? ", O shows the photo in its frame" : "";
-  statusLine.textContent = `${name} (${splatFile}): drag to look, W A S D to move, E up, Q down${photoHint}`;
+  const floorHint = colliderFile !== undefined ? ", N shows the walkable floor" : "";
+  statusLine.textContent = `${name} (${splatFile}): drag to look, W A S D to move, E up, Q down${photoHint}${floorHint}`;
+}
+
+/** Measures the walkable floor the first time it is asked for, then shows or hides it. */
+class WalkableFloorToggle {
+  private readonly colliderUrl: string;
+  private readonly placement: WorldPlacement;
+  private readonly photoCameras: PhotoCamera[];
+  private overlay: THREE.Mesh | undefined;
+  private description = "";
+  private measuring = false;
+
+  constructor(colliderUrl: string, placement: WorldPlacement, photoCameras: PhotoCamera[]) {
+    this.colliderUrl = colliderUrl;
+    this.placement = placement;
+    this.photoCameras = photoCameras;
+  }
+
+  async toggle(): Promise<void> {
+    if (this.overlay !== undefined) {
+      this.overlay.visible = !this.overlay.visible;
+      walkableLine.textContent = this.overlay.visible ? this.description : "";
+      return;
+    }
+    if (this.measuring) {
+      return;
+    }
+    this.measuring = true;
+    walkableLine.textContent = "Measuring the walkable floor...";
+    try {
+      // Loaded only now: the navigation library is about 760 kB.
+      const [{ measureWalkableFloor }, response] = await Promise.all([
+        import("@unpictured/core/walkable"),
+        fetch(this.colliderUrl),
+      ]);
+      if (!response.ok) {
+        throw new Error(`${this.colliderUrl}: HTTP ${response.status}`);
+      }
+      const collider = parseGlbMesh(await response.arrayBuffer());
+      const floor = await measureWalkableFloor(collider, this.placement, this.photoCameras);
+      this.overlay = buildFloorOverlay(floor);
+      scene.add(this.overlay);
+      this.description = describeFloor(floor);
+      walkableLine.textContent = this.description;
+    } catch (error) {
+      walkableLine.textContent = `Could not measure the walkable floor: ${errorMessage(error)}`;
+    } finally {
+      this.measuring = false;
+    }
+  }
 }
 
 /** The world's camera.json, or no cameras when `locate` has not been run for it. */
