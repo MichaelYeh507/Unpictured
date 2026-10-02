@@ -129,17 +129,89 @@ test("a world with no floor under the photo spot is refused", async () => {
   );
 });
 
-test("the floor below a point is the highest surface under it", () => {
+test("the floor below a point is the highest walkable surface under it", () => {
   const stacked = [
     ...rectangle(-1, 1, -1, 1, 0),
     ...rectangle(-1, 1, -1, 1, 0.8),
+    ...rectangle(-1, 1, -1, 1, 1.2, false), // a downward-facing fragment: not a floor
     ...rectangle(-1, 1, -1, 1, 2),
   ];
-  const mesh = collider(stacked, METRIC);
-  const positions = Array.from({ length: mesh.positions.length / 3 }, (_, index) =>
-    Array.from(mesh.positions.slice(index * 3, index * 3 + 3)),
-  ).flatMap((point) => [point[0] ?? 0, -(point[1] ?? 0) + 1.5, -(point[2] ?? 0)]);
+  const triangles = stacked.flat();
+  const positions = triangles.flat();
+  const indices = triangles.map((_, index) => index);
 
-  expect(heightBelow(positions, mesh.indices, [0, 1.5, 0])).toBeCloseTo(0.8, 6);
-  expect(heightBelow(positions, mesh.indices, [5, 1.5, 0])).toBeUndefined();
+  expect(heightBelow(positions, indices, [0, 1.5, 0])).toBeCloseTo(0.8, 6);
+  expect(heightBelow(positions, indices, [5, 1.5, 0])).toBeUndefined();
+});
+
+/** A vertical wall along x = `x`, from `bottom` to `top`, so a raised floor has a side. */
+function wall(x: number, z0: number, z1: number, bottom: number, top: number): Vec3[][] {
+  const corners: [Vec3, Vec3, Vec3, Vec3] = [
+    [x, bottom, z0],
+    [x, bottom, z1],
+    [x, top, z1],
+    [x, top, z0],
+  ];
+  const [a, b, c, d] = corners;
+  return [
+    [a, b, c],
+    [a, c, d],
+  ];
+}
+
+test("a person can step up 0.3 m but not 0.4 m", async () => {
+  // Recast measures steps in 5 cm voxels, so a step can read up to a voxel lower than it is:
+  // 0.32 m still counts as a 0.3 m step.
+  const withStep = (height: number) => [
+    ...rectangle(-3, 1, -2, 2, 0),
+    ...rectangle(1, 3, -2, 2, height),
+    ...wall(1, -2, 2, 0, height),
+  ];
+
+  const low = await measureWalkableFloor(collider(withStep(0.32), METRIC), METRIC, []);
+  const high = await measureWalkableFloor(collider(withStep(0.4), METRIC), METRIC, []);
+
+  expect(low.reachableArea).toBeCloseTo(low.walkableArea, 6);
+  expect(high.reachableArea).toBeLessThan(high.walkableArea - 4);
+});
+
+test("a large, cluttered floor is searched to the end", async () => {
+  // 30 m square with a post every metre: thousands of floor pieces, all connected.
+  const posts: Vec3[][] = [];
+  for (let x = -14; x <= 14; x++) {
+    for (let z = -14; z <= 14; z++) {
+      if (x === 0 && z === 0) {
+        continue; // keep the floor below the photo spot clear
+      }
+      posts.push(
+        ...wall(x - 0.05, z - 0.05, z + 0.05, 0, 2),
+        ...wall(x + 0.05, z - 0.05, z + 0.05, 0, 2),
+      );
+    }
+  }
+  const room = [...rectangle(-15, 15, -15, 15, 0), ...posts];
+
+  const floor = await measureWalkableFloor(collider(room, METRIC), METRIC, []);
+
+  expect(floor.walkableArea).toBeGreaterThan(500);
+  expect(floor.reachableArea).toBeCloseTo(floor.walkableArea, 6);
+});
+
+test("a draft's photo covers the same floor once sizes are estimated", async () => {
+  // The photo spot is 1 unit (1.5 m) up: the photo sees 2 by 1.5 units, 3 m by 2.25 m.
+  const room = rectangle(-3, 3, -2, 2, 0.6);
+
+  const floor = await measureWalkableFloor(collider(room, DRAFT), DRAFT, [LOOKING_DOWN]);
+
+  expect(floor.picturedArea).toBeGreaterThan(6.75 * 0.85);
+  expect(floor.picturedArea).toBeLessThanOrEqual(6.75 + 0.2);
+});
+
+test("a photo spot whose floor is too small to stand on is refused", async () => {
+  // A 0.3 m square under the camera is narrower than a person; the real floor is far away.
+  const room = [...rectangle(-0.15, 0.15, -0.15, 0.15, 0), ...rectangle(8, 12, -2, 2, 0)];
+
+  await expect(measureWalkableFloor(collider(room, METRIC), METRIC, [])).rejects.toThrow(
+    "no walkable floor within a metre of the photo spot",
+  );
 });

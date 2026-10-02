@@ -47,10 +47,14 @@ export function parseGlbMesh(bytes: ArrayBuffer): TriangleMesh {
   if (view.getUint32(16, true) !== JSON_CHUNK) {
     throw new Error("collider.glb has no JSON chunk");
   }
-  const gltf = JSON.parse(bytesToText(new Uint8Array(bytes, 20, jsonLength))) as Gltf;
-  const binStart = 20 + jsonLength + 8;
-  if (binStart > bytes.byteLength || view.getUint32(binStart - 4, true) !== BIN_CHUNK) {
+  const binHeader = 20 + jsonLength;
+  if (binHeader + 8 > bytes.byteLength || view.getUint32(binHeader + 4, true) !== BIN_CHUNK) {
     throw new Error("collider.glb has no binary chunk");
+  }
+  const gltf = JSON.parse(bytesToText(new Uint8Array(bytes, 20, jsonLength))) as Gltf;
+  const bin = { start: binHeader + 8, end: binHeader + 8 + view.getUint32(binHeader, true) };
+  if (bin.end > bytes.byteLength) {
+    throw new Error("collider.glb is cut short");
   }
   // Marble's colliders place vertices directly; a moved, turned or scaled node would be misplaced.
   const transformKeys = ["matrix", "translation", "rotation", "scale"];
@@ -69,35 +73,41 @@ export function parseGlbMesh(bytes: ArrayBuffer): TriangleMesh {
         throw new Error("collider.glb has a primitive that is not a triangle list with positions");
       }
       const first = positions.length / 3;
-      const vertexCount = readPositions(
-        gltf,
-        view,
-        binStart,
-        primitive.attributes.POSITION,
-        positions,
-      );
+      const vertexCount = readPositions(gltf, view, bin, primitive.attributes.POSITION, positions);
       if (primitive.indices === undefined) {
         for (let index = 0; index < vertexCount; index++) {
           indices.push(first + index);
         }
       } else {
-        for (const index of readIndices(gltf, view, binStart, primitive.indices)) {
+        for (const index of readIndices(gltf, view, bin, primitive.indices)) {
+          if (index >= vertexCount) {
+            throw new Error("collider.glb has a triangle that points past its vertices");
+          }
           indices.push(first + index);
         }
       }
     }
   }
+  if (indices.length % 3 !== 0) {
+    throw new Error("collider.glb has a triangle list that is not whole triangles");
+  }
   return { positions: Float32Array.from(positions), indices: Uint32Array.from(indices) };
+}
+
+/** Where the binary chunk's data starts and ends in the file. */
+interface BinChunk {
+  start: number;
+  end: number;
 }
 
 function readPositions(
   gltf: Gltf,
   view: DataView,
-  binStart: number,
+  bin: BinChunk,
   accessorIndex: number,
   out: number[],
 ): number {
-  const { accessor, start } = locate(gltf, binStart, accessorIndex, 12);
+  const { accessor, start } = locate(gltf, bin, accessorIndex, 12);
   if (accessor.componentType !== FLOAT || accessor.type !== "VEC3") {
     throw new Error("collider.glb positions are not 32-bit float triples");
   }
@@ -107,18 +117,13 @@ function readPositions(
   return accessor.count;
 }
 
-function readIndices(
-  gltf: Gltf,
-  view: DataView,
-  binStart: number,
-  accessorIndex: number,
-): number[] {
+function readIndices(gltf: Gltf, view: DataView, bin: BinChunk, accessorIndex: number): number[] {
   const componentType = gltf.accessors?.[accessorIndex]?.componentType ?? 0;
   const indexType = INDEX_TYPES[componentType];
   if (indexType === undefined) {
     throw new Error("collider.glb indices are not unsigned integers");
   }
-  const { accessor, start } = locate(gltf, binStart, accessorIndex, indexType.bytes);
+  const { accessor, start } = locate(gltf, bin, accessorIndex, indexType.bytes);
   const result: number[] = [];
   for (let item = 0; item < accessor.count; item++) {
     result.push(indexType.read(view, start + item * indexType.bytes));
@@ -127,7 +132,7 @@ function readIndices(
 }
 
 /** Finds where an accessor's data starts in the file, and refuses interleaved data. */
-function locate(gltf: Gltf, binStart: number, accessorIndex: number, elementBytes: number) {
+function locate(gltf: Gltf, bin: BinChunk, accessorIndex: number, elementBytes: number) {
   const accessor = gltf.accessors?.[accessorIndex];
   const bufferView =
     accessor?.bufferView === undefined ? undefined : gltf.bufferViews?.[accessor.bufferView];
@@ -137,9 +142,10 @@ function locate(gltf: Gltf, binStart: number, accessorIndex: number, elementByte
   if (bufferView.byteStride !== undefined && bufferView.byteStride !== elementBytes) {
     throw new Error("collider.glb has interleaved vertex data, which is not supported");
   }
-  const start = binStart + (bufferView.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
+  const viewStart = bin.start + (bufferView.byteOffset ?? 0);
+  const start = viewStart + (accessor.byteOffset ?? 0);
   const end = start + accessor.count * elementBytes;
-  if (end > binStart + bufferView.byteLength + (bufferView.byteOffset ?? 0)) {
+  if (end > viewStart + bufferView.byteLength || end > bin.end) {
     throw new Error("collider.glb data runs past its buffer");
   }
   return { accessor, start };

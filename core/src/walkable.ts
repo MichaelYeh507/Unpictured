@@ -3,7 +3,13 @@
  * (recast-navigation-js), so it is a separate entry point that the viewer loads only on demand.
  */
 
-import { getNavMeshPositionsAndIndices, init, NavMeshQuery } from "@recast-navigation/core";
+import {
+  Detour,
+  getNavMeshPositionsAndIndices,
+  init,
+  NavMeshQuery,
+  statusDetail,
+} from "@recast-navigation/core";
 import { generateSoloNavMesh } from "@recast-navigation/generators";
 import { isInPhoto, type PhotoCamera } from "./camera.ts";
 import type { TriangleMesh } from "./collider.ts";
@@ -19,15 +25,18 @@ import {
 export const WALKER = { height: 1.6, stepHeight: 0.3, radius: 0.2, maxSlopeDeg: 40 };
 /** Drafts have no scale, so assume the photo was taken this many metres above the floor. */
 export const ASSUMED_CAMERA_HEIGHT = 1.5;
-const VOXEL = 0.05; // metres per side of Recast's voxels
+const VOXEL = 0.05; // metres per side of Recast's voxels, coarser only for very large worlds
+const MAX_VOXELS_PER_SIDE = 2000; // keeps Recast's grid, and its memory, bounded
 const CELL = 0.1; // metres per side of the grid the floor is measured and drawn on
+const MAX_POLYGONS = 65535; // Detour's limit for one search
+const MAX_CELLS = 200_000; // larger floors get coarser cells, so the overlay stays drawable
 
 export interface FloorCell {
   /** The middle of the cell, on the floor, in the game frame. */
   center: Vec3;
   /** Connected to the floor below the photo spot. */
   reachable: boolean;
-  /** Inside at least one photo's frame (what furniture hides is not considered). */
+  /** Reachable and inside at least one photo's frame (what furniture hides is not considered). */
   pictured: boolean;
 }
 
@@ -45,7 +54,7 @@ export interface WalkableFloor {
   reachableArea: number;
   picturedArea: number;
   unpicturedArea: number;
-  /** Metres along the floor from below the photo spot to the farthest reachable cell. */
+  /** Metres in a straight line, seen from above, from the photo spot to the farthest reachable cell. */
   farthest: number;
 }
 
@@ -70,29 +79,37 @@ export async function measureWalkableFloor(
   }
   const heightInUnits = photoSpot[1] - floorY;
   const metresPerUnit = placement.metric ? 1 : ASSUMED_CAMERA_HEIGHT / heightInUnits;
+  const voxel = Math.max(VOXEL, (widestSide(positions) * metresPerUnit) / MAX_VOXELS_PER_SIDE);
 
-  // Recast's walker sizes are in voxels, so they do not depend on the world's units.
+  // Recast takes the walker's sizes in voxels, rounded (0.3 / 0.05 is 5.999... in floating point).
   const built = generateSoloNavMesh(positions, collider.indices, {
-    cs: VOXEL / metresPerUnit,
-    ch: VOXEL / metresPerUnit,
-    walkableHeight: Math.ceil(WALKER.height / VOXEL),
-    walkableClimb: Math.floor(WALKER.stepHeight / VOXEL),
-    walkableRadius: Math.ceil(WALKER.radius / VOXEL),
+    cs: voxel / metresPerUnit,
+    ch: voxel / metresPerUnit,
+    walkableHeight: Math.round(WALKER.height / voxel),
+    walkableClimb: Math.round(WALKER.stepHeight / voxel),
+    walkableRadius: Math.max(1, Math.round(WALKER.radius / voxel)),
     walkableSlopeAngle: WALKER.maxSlopeDeg,
   });
   if (!built.success) {
     throw new Error(`could not work out the walkable floor: ${built.error}`);
   }
-  const query = new NavMeshQuery(built.navMesh);
+  const navMesh = built.navMesh;
+  let query: NavMeshQuery | undefined;
   try {
-    const reachable = reachablePolygons(query, [photoSpot[0], floorY, photoSpot[2]], metresPerUnit);
-    const cells = floorCells(built.navMesh, query, reachable, metresPerUnit, (point) =>
+    query = new NavMeshQuery(navMesh, { maxNodes: MAX_POLYGONS });
+    const floorPoint: Vec3 = [photoSpot[0], floorY, photoSpot[2]];
+    const reachable = reachablePolygons(query, floorPoint, metresPerUnit);
+    const [navPositions, navIndices] = getNavMeshPositionsAndIndices(navMesh);
+    const floorArea = projectedArea(navPositions, navIndices) * metresPerUnit ** 2;
+    const cell = Math.max(CELL, 2 * voxel, Math.sqrt(floorArea / MAX_CELLS));
+    const triangles = { positions: navPositions, indices: navIndices };
+    const cells = floorCells(triangles, query, reachable, cell / metresPerUnit, (point) =>
       cameras.some((camera) => isInPhoto(camera, toRawFrame(point, placement))),
     );
-    return summarize(cells, photoSpot, metresPerUnit, !placement.metric, heightInUnits);
+    return summarize(cells, cell, photoSpot, metresPerUnit, !placement.metric, heightInUnits);
   } finally {
-    query.destroy();
-    built.navMesh.destroy();
+    query?.destroy();
+    navMesh.destroy();
   }
 }
 
@@ -108,29 +125,53 @@ function reachablePolygons(
     { x, y, z },
     { halfExtents: { x: extent, y: extent / 2, z: extent } },
   );
-  const reachable = new Set<number>();
   if (!start.success || start.nearestRef === 0) {
-    return reachable;
+    throw new Error("there is no walkable floor within a metre of the photo spot");
   }
   const around = query.findPolysAroundCircle(start.nearestRef, start.nearestPoint, 1e6, {
-    maxPolys: 65536,
+    maxPolys: MAX_POLYGONS,
   });
+  // Detour stops early but still reports success when it runs out of room.
+  const ranOut =
+    statusDetail(around.status, Detour.DT_OUT_OF_NODES) ||
+    statusDetail(around.status, Detour.DT_BUFFER_TOO_SMALL);
+  if (!around.success || ranOut) {
+    throw new Error(
+      `the floor has more than ${MAX_POLYGONS} pieces to search, too many to measure`,
+    );
+  }
+  const reachable = new Set<number>();
   for (let index = 0; index < around.resultCount; index++) {
     reachable.add(around.resultRefs[index] ?? 0);
   }
   return reachable;
 }
 
-/** The walkable floor on a grid of CELL-sized squares, one cell per grid point inside it. */
+/** The longer of the collider's two sides seen from above, in game units. */
+function widestSide(positions: Float32Array): number {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i] ?? 0;
+    const z = positions[i + 2] ?? 0;
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minZ = Math.min(minZ, z);
+    maxZ = Math.max(maxZ, z);
+  }
+  return Math.max(maxX - minX, maxZ - minZ);
+}
+
+/** The walkable floor on a grid of squares `cell` units wide, one per grid point inside it. */
 function floorCells(
-  navMesh: Parameters<typeof getNavMeshPositionsAndIndices>[0],
+  { positions: navPositions, indices: navIndices }: { positions: number[]; indices: number[] },
   query: NavMeshQuery,
   reachable: Set<number>,
-  metresPerUnit: number,
+  cell: number,
   isPictured: (point: Vec3) => boolean,
 ): FloorCell[] {
-  const [navPositions, navIndices] = getNavMeshPositionsAndIndices(navMesh);
-  const cell = CELL / metresPerUnit;
   const cells: FloorCell[] = [];
   for (let i = 0; i < navIndices.length; i += 3) {
     const a = vertex(navPositions, navIndices[i] ?? 0);
@@ -166,12 +207,13 @@ function floorCells(
 
 function summarize(
   cells: FloorCell[],
+  cellMetres: number,
   photoSpot: Vec3,
   metresPerUnit: number,
   estimated: boolean,
   heightInUnits: number,
 ): WalkableFloor {
-  const cellArea = CELL * CELL;
+  const cellArea = cellMetres * cellMetres;
   let reachableCount = 0;
   let picturedCount = 0;
   let farthest = 0;
@@ -186,7 +228,7 @@ function summarize(
   }
   return {
     cells,
-    cellSize: CELL / metresPerUnit,
+    cellSize: cellMetres / metresPerUnit,
     metresPerUnit,
     estimated,
     cameraHeight: heightInUnits * metresPerUnit,
@@ -198,26 +240,39 @@ function summarize(
   };
 }
 
-/** The highest surface below a point, straight down, or undefined if there is none. */
+/** The highest walkable surface straight below a point: facing up, no steeper than a walker
+ * can climb. Ceilings, walls and stray downward fragments are skipped. */
 export function heightBelow(
   positions: ArrayLike<number>,
   indices: ArrayLike<number>,
   point: Vec3,
 ): number | undefined {
+  const steepest = Math.cos((WALKER.maxSlopeDeg * Math.PI) / 180);
   let highest: number | undefined;
   for (let i = 0; i < indices.length; i += 3) {
-    const y = heightInTriangle(
-      vertex(positions, indices[i] ?? 0),
-      vertex(positions, indices[i + 1] ?? 0),
-      vertex(positions, indices[i + 2] ?? 0),
-      point[0],
-      point[2],
-    );
+    const a = vertex(positions, indices[i] ?? 0);
+    const b = vertex(positions, indices[i + 1] ?? 0);
+    const c = vertex(positions, indices[i + 2] ?? 0);
+    if (upwardness(a, b, c) < steepest) {
+      continue;
+    }
+    const y = heightInTriangle(a, b, c, point[0], point[2]);
     if (y !== undefined && y < point[1] && (highest === undefined || y > highest)) {
       highest = y;
     }
   }
   return highest;
+}
+
+/** How much a triangle faces up, from 1 (flat, facing up) to -1 (facing down), as Recast sees it. */
+function upwardness(a: Vec3, b: Vec3, c: Vec3): number {
+  const e0 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const e1 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+  const [e0x = 0, e0y = 0, e0z = 0] = e0;
+  const [e1x = 0, e1y = 0, e1z = 0] = e1;
+  const normal = [e0y * e1z - e0z * e1y, e0z * e1x - e0x * e1z, e0x * e1y - e0y * e1x];
+  const length = Math.hypot(...normal);
+  return length === 0 ? -1 : (normal[1] ?? 0) / length;
 }
 
 /** The triangle's height at (x, z) seen from above, or undefined outside it. */
@@ -233,6 +288,18 @@ function heightInTriangle(a: Vec3, b: Vec3, c: Vec3, x: number, z: number): numb
     return undefined;
   }
   return wa * a[1] + wb * b[1] + wc * c[1];
+}
+
+/** The area of the triangles seen from above, in game units squared. */
+function projectedArea(positions: number[], indices: number[]): number {
+  let area = 0;
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = vertex(positions, indices[i] ?? 0);
+    const b = vertex(positions, indices[i + 1] ?? 0);
+    const c = vertex(positions, indices[i + 2] ?? 0);
+    area += Math.abs((b[0] - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (b[2] - a[2])) / 2;
+  }
+  return area;
 }
 
 /** Grid indices whose cell centers fall between min and max. */

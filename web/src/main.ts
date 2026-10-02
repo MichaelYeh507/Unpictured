@@ -157,7 +157,7 @@ class WalkableFloorToggle {
     this.measuring = true;
     walkableLine.textContent = "Measuring the walkable floor...";
     try {
-      // Loaded only now: the navigation library is about 1 MB.
+      // Loaded only now: the navigation library is about 760 kB.
       const [{ measureWalkableFloor }, response] = await Promise.all([
         import("@unpictured/core/walkable"),
         fetch(this.colliderUrl),
