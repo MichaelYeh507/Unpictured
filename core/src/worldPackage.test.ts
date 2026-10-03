@@ -1,5 +1,11 @@
 import { expect, test } from "vitest";
-import { isWorldName, parseWorldFilePath, parseWorldMeta, pickSplatFile } from "./worldPackage.ts";
+import {
+  isSplatDetail,
+  isWorldName,
+  parseWorldFilePath,
+  parseWorldMeta,
+  pickSplatFile,
+} from "./worldPackage.ts";
 
 /** The shape the pipeline wrote for the first real draft (2026-09-29), shortened. */
 function draftMeta(): Record<string, unknown> {
@@ -78,6 +84,38 @@ test("falls back to fewer splats when a package lacks the full file", () => {
 
 test("refuses a package with no splat file", () => {
   expect(() => pickSplatFile(metaWithSplats({}))).toThrow("lists no splat file");
+});
+
+test("recognizes the splat levels a world address may ask for", () => {
+  expect(isSplatDetail("full_res")).toBe(true);
+  expect(isSplatDetail("500k")).toBe(true);
+  expect(isSplatDetail("100k")).toBe(true);
+  expect(isSplatDetail("1m")).toBe(false);
+  expect(isSplatDetail("100K")).toBe(false);
+  expect(isSplatDetail("splats_100k")).toBe(false);
+  expect(isSplatDetail("")).toBe(false);
+});
+
+test("asks for a splat level by name", () => {
+  const meta = parseWorldMeta(draftMeta());
+
+  expect(pickSplatFile(meta, "full_res")).toBe("splats.spz");
+  expect(pickSplatFile(meta, "500k")).toBe("splats_500k.spz");
+  expect(pickSplatFile(meta, "100k")).toBe("splats_100k.spz");
+});
+
+test("takes the next smaller file when the requested level is missing", () => {
+  const without500k = { splats_full_res: "splats.spz", splats_100k: "splats_100k.spz" };
+
+  expect(pickSplatFile(metaWithSplats(without500k), "500k")).toBe("splats_100k.spz");
+});
+
+test("takes the smallest file when nothing is as small as requested", () => {
+  const without100k = { splats_full_res: "splats.spz", splats_500k: "splats_500k.spz" };
+  const onlyFullRes = { splats_full_res: "splats.spz" };
+
+  expect(pickSplatFile(metaWithSplats(without100k), "100k")).toBe("splats_500k.spz");
+  expect(pickSplatFile(metaWithSplats(onlyFullRes), "100k")).toBe("splats.spz");
 });
 
 test("world names follow the pipeline's --name rule", () => {

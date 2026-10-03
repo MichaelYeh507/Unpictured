@@ -57,6 +57,11 @@ in yellow, starts looking through the first photo, and O lays the photo over the
 where a person can walk from the photo spot and colors that floor: blue inside a photo, pink
 unpictured, gray out of reach, with the areas on screen.
 
+Phones need a lighter splat file: add `&splats=500k` or `&splats=100k` to the address
+(`&splats=full_res` asks for the most detailed). If the world lacks that size, the viewer takes the
+next smaller file, or its smallest file when nothing is that small. The status line names the file
+it loaded.
+
 `generate` defaults to the cheap draft model and refuses to pass a daily cap
 (`UNPICTURED_DAILY_CAP_USD`, default $3). Every paid call is logged to one file per user,
 `~/.unpictured/cost_log.jsonl` (`UNPICTURED_COST_LOG` to move it), so every clone shares the

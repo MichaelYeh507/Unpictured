@@ -1,5 +1,6 @@
 import { SparkControls, SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
 import {
+  isSplatDetail,
   isWorldName,
   type PhotoCamera,
   parseCameraFile,
@@ -7,6 +8,7 @@ import {
   parseWorldMeta,
   pickSplatFile,
   placeWorld,
+  SPLAT_DETAILS,
   sourceCameraPosition,
   type WorldPlacement,
 } from "@unpictured/core";
@@ -57,10 +59,18 @@ loadWorld().catch((error: unknown) => {
 });
 
 async function loadWorld(): Promise<void> {
-  const name = new URLSearchParams(window.location.search).get("world");
+  const params = new URLSearchParams(window.location.search);
+  const name = params.get("world");
   if (name === null || !isWorldName(name)) {
     statusLine.textContent =
       "Add ?world=<name> to the address, where <name> is a folder in worlds/.";
+    return;
+  }
+  const requested = params.get("splats");
+  if (requested !== null && !isSplatDetail(requested)) {
+    statusLine.textContent = `?splats=${requested} is not a splat level (${SPLAT_DETAILS.join(
+      ", ",
+    )}).`;
     return;
   }
   statusLine.textContent = `Loading ${name}...`;
@@ -70,7 +80,7 @@ async function loadWorld(): Promise<void> {
     throw new Error(`worlds/${name}/meta.json: HTTP ${response.status}`);
   }
   const meta = parseWorldMeta(await response.json());
-  const splatFile = pickSplatFile(meta);
+  const splatFile = pickSplatFile(meta, requested ?? undefined);
   statusLine.textContent = `Loading ${name} (${splatFile})...`;
 
   const placement = placeWorld(meta.frame);
