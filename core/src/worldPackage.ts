@@ -6,8 +6,11 @@ import type { FrameMetadata } from "./frames.ts";
 const WORLD_NAME = /^[a-z0-9][a-z0-9-]*$/;
 /** A plain file name: no folders, and it cannot start with a dot. */
 const FILE_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
-/** Splat file roles from most to least detail. */
-const SPLAT_ROLES = ["splats_full_res", "splats_500k", "splats_100k"];
+/** Splat detail levels a world address may ask for, from most to least detail. */
+export const SPLAT_DETAILS = ["full_res", "500k", "100k"] as const;
+export type SplatDetail = (typeof SPLAT_DETAILS)[number];
+/** Splat file roles for those levels, most detailed first. */
+const SPLAT_ROLES = SPLAT_DETAILS.map((detail) => `splats_${detail}`);
 
 export interface WorldMeta {
   worldId: string;
@@ -18,6 +21,10 @@ export interface WorldMeta {
 
 export function isWorldName(name: string): boolean {
   return WORLD_NAME.test(name);
+}
+
+export function isSplatDetail(value: string): value is SplatDetail {
+  return (SPLAT_DETAILS as readonly string[]).includes(value);
 }
 
 export function isPlainFileName(name: string): boolean {
@@ -49,13 +56,27 @@ export function parseWorldMeta(json: unknown): WorldMeta {
   };
 }
 
-/** The most detailed splat file the package has. */
-export function pickSplatFile(meta: WorldMeta): string {
-  for (const role of SPLAT_ROLES) {
+/**
+ * The splat file the package has for `detail`. By default that is the most detailed file;
+ * a specific level picks that level, else the most detailed smaller one, and a package with
+ * nothing that small falls back to its smallest file. The viewer never loads something more
+ * detailed than asked for unless the package offers nothing smaller.
+ */
+export function pickSplatFile(meta: WorldMeta, detail: SplatDetail = "full_res"): string {
+  const wanted = SPLAT_ROLES.indexOf(`splats_${detail}`);
+  let smallestTooDetailed: string | undefined;
+  for (const [index, role] of SPLAT_ROLES.entries()) {
     const fileName = meta.files[role];
-    if (fileName !== undefined) {
+    if (fileName === undefined) {
+      continue;
+    }
+    if (index >= wanted) {
       return fileName;
     }
+    smallestTooDetailed = fileName;
+  }
+  if (smallestTooDetailed !== undefined) {
+    return smallestTooDetailed;
   }
   throw new Error(`meta.json lists no splat file (${SPLAT_ROLES.join(", ")})`);
 }

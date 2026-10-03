@@ -51,8 +51,11 @@ uv run python -m unpictured_pipeline locate --name <name>
 
 To walk around a world, run `npm run dev` and open `http://localhost:5173/?world=<name>`, where
 `<name>` is a folder in `worlds/`. Drag to look, W A S D to move, E up, Q down. The viewer loads
-the most detailed splat file the world has. Draft worlds have no metric data, so they show at raw
-scale with a notice on screen. When a world has `camera.json`, the viewer draws each photo's frame
+the most detailed splat file the world has; add `&splats=100k` (or `500k`, or `full_res`) to ask
+for a smaller one, as phones need. The viewer never loads a file more detailed than you asked for,
+and falls back to the closest smaller file when the world lacks the level you named. Draft worlds
+have no metric data, so they show at raw scale with a notice on screen. When a world has
+`camera.json`, the viewer draws each photo's frame
 in yellow, starts looking through the first photo, and O lays the photo over the world. N measures
 where a person can walk from the photo spot and colors that floor: blue inside a photo, pink
 unpictured, gray out of reach, with the areas on screen.
