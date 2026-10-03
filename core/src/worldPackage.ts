@@ -57,13 +57,11 @@ export function parseWorldMeta(json: unknown): WorldMeta {
 }
 
 /**
- * The splat file the package has for `detail`. By default that is the most detailed file;
- * a specific level picks that level, else the most detailed smaller one, and a package with
- * nothing that small falls back to its smallest file. The viewer never loads something more
- * detailed than asked for unless the package offers nothing smaller.
+ * The package's file for `detail`, by default the most detailed. A missing level falls back to
+ * the next smaller file, or to the smallest file when the package has nothing that small.
  */
 export function pickSplatFile(meta: WorldMeta, detail: SplatDetail = "full_res"): string {
-  const wanted = SPLAT_ROLES.indexOf(`splats_${detail}`);
+  const wanted = SPLAT_DETAILS.indexOf(detail);
   let smallestTooDetailed: string | undefined;
   for (const [index, role] of SPLAT_ROLES.entries()) {
     const fileName = meta.files[role];

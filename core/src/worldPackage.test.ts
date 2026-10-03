@@ -91,6 +91,8 @@ test("recognizes the splat levels a world address may ask for", () => {
   expect(isSplatDetail("500k")).toBe(true);
   expect(isSplatDetail("100k")).toBe(true);
   expect(isSplatDetail("1m")).toBe(false);
+  expect(isSplatDetail("100K")).toBe(false);
+  expect(isSplatDetail("splats_100k")).toBe(false);
   expect(isSplatDetail("")).toBe(false);
 });
 
@@ -102,13 +104,13 @@ test("asks for a splat level by name", () => {
   expect(pickSplatFile(meta, "100k")).toBe("splats_100k.spz");
 });
 
-test("never loads a splat file more detailed than the address asks for", () => {
+test("takes the next smaller file when the requested level is missing", () => {
   const without500k = { splats_full_res: "splats.spz", splats_100k: "splats_100k.spz" };
 
   expect(pickSplatFile(metaWithSplats(without500k), "500k")).toBe("splats_100k.spz");
 });
 
-test("falls back to the smallest splat file when the requested level is missing", () => {
+test("takes the smallest file when nothing is as small as requested", () => {
   const without100k = { splats_full_res: "splats.spz", splats_500k: "splats_500k.spz" };
   const onlyFullRes = { splats_full_res: "splats.spz" };
 
