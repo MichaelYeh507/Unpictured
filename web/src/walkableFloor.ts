@@ -52,10 +52,15 @@ export function describeFloor(floor: WalkableFloor): string {
   const estimate = floor.estimated
     ? " Sizes are estimated: this world has no scale, so the photo is assumed to be 1.5 m up."
     : "";
+  const start =
+    floor.startDistance > 0
+      ? ` The collider has a hole under the photo spot, so this is measured from the nearest ` +
+        `floor, ${about}${floor.startDistance.toFixed(1)} m away.`
+      : "";
   return (
     `Walkable floor: ${about}${floor.reachableArea.toFixed(1)} m² reachable, ` +
     `${floor.unpicturedArea.toFixed(1)} m² of it unpictured (${share.toFixed(0)}%), ` +
     `farthest ${floor.farthest.toFixed(1)} m away. ` +
-    `Blue: in a photo. Pink: unpictured. Gray: out of reach.${estimate}`
+    `Blue: in a photo. Pink: unpictured. Gray: out of reach.${start}${estimate}`
   );
 }

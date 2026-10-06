@@ -55,7 +55,9 @@ the most detailed splat file the world has. Draft worlds have no metric data, so
 scale with a notice on screen. When a world has `camera.json`, the viewer draws each photo's frame
 in yellow, starts looking through the first photo, and O lays the photo over the world. N measures
 where a person can walk from the photo spot and colors that floor: blue inside a photo, pink
-unpictured, gray out of reach, with the areas on screen.
+unpictured, gray out of reach, with the areas on screen. Outdoors the world often has a hole
+right under the photo spot, which the photo never saw; then N measures from the nearest floor and
+says how far away that is.
 
 Phones need a lighter splat file: add `&splats=500k` or `&splats=100k` to the address
 (`&splats=full_res` asks for the most detailed). If the world lacks that size, the viewer takes the
