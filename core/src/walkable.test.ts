@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { PhotoCamera } from "./camera.ts";
 import type { TriangleMesh } from "./collider.ts";
 import { placeWorld, toRawFrame, type Vec3, type WorldPlacement } from "./frames.ts";
-import { heightBelow, measureWalkableFloor, WALKER } from "./walkable.ts";
+import { heightBelow, measureWalkableFloor, nearestFloor, WALKER } from "./walkable.ts";
 
 /** A metric world whose photo spot is 1.5 m above the floor at y = 0. */
 const METRIC = placeWorld({
@@ -86,6 +86,7 @@ test("measures the reachable floor and how much of it the photo saw", async () =
 
   expect(floor.estimated).toBe(false);
   expect(floor.cameraHeight).toBeCloseTo(1.5, 3);
+  expect(floor.startDistance).toBe(0);
   expectFloorArea(floor.reachableArea, 6, 4);
   expectFloorArea(floor.walkableArea - floor.reachableArea, 2, 2); // the patch out of reach
   // From 1.5 m up, a 90 degree, 4:3 photo sees 3 m by 2.25 m (6.75 m2) of floor. Recast's
@@ -121,12 +122,135 @@ test("a draft's sizes come from the assumed camera height", async () => {
   expectFloorArea(floor.reachableArea, 9, 6);
 });
 
-test("a world with no floor under the photo spot is refused", async () => {
+test("a world with no floor below or near the photo spot is refused", async () => {
   const elsewhere = rectangle(8, 10, -1, 1, 0);
 
   await expect(measureWalkableFloor(collider(elsewhere, METRIC), METRIC, [])).rejects.toThrow(
-    "no floor below the photo spot",
+    "no floor below or near the photo spot",
   );
+});
+
+/** A square floor `half` units out from the middle, with a square hole `hole` units out. */
+function floorWithHole(half: number, hole: number, y: number): Vec3[][] {
+  return [
+    ...rectangle(-half, half, -half, -hole, y),
+    ...rectangle(-half, half, hole, half, y),
+    ...rectangle(-half, -hole, -hole, hole, y),
+    ...rectangle(hole, half, -hole, hole, y),
+  ];
+}
+
+test("a hole under the photo spot is measured from the nearest floor", async () => {
+  // The photo spot is 1.5 m up and the hole's edge is 1 m away.
+  const ground = floorWithHole(5, 1, 0);
+
+  const floor = await measureWalkableFloor(collider(ground, METRIC), METRIC, []);
+
+  expect(floor.startDistance).toBeCloseTo(1, 6);
+  expect(floor.cameraHeight).toBeCloseTo(1.5, 6);
+  // 9.6 m square less a 2.4 m hole (86.4 m2) once the clearance is taken off; Recast drops up
+  // to a voxel more along each edge.
+  expect(floor.reachableArea).toBeGreaterThan(82);
+  expect(floor.reachableArea).toBeLessThan(87);
+  expect(floor.reachableArea).toBeCloseTo(floor.walkableArea, 6);
+});
+
+test("a floor counts as near when it is no farther away than twice its depth below", async () => {
+  // The photo spot is 1.5 m up, so a floor up to 3 m away counts.
+  const near = collider(floorWithHole(6, 2.8, 0), METRIC);
+  const far = collider(floorWithHole(6, 3.2, 0), METRIC);
+
+  const floor = await measureWalkableFloor(near, METRIC, []);
+
+  expect(floor.startDistance).toBeCloseTo(2.8, 6);
+  await expect(measureWalkableFloor(far, METRIC, [])).rejects.toThrow(
+    "no floor below or near the photo spot",
+  );
+});
+
+test("a stray sliver in the hole is not taken for the floor", async () => {
+  // A 10 cm piece 0.45 m away: 0.3 m or 0.9 m down inside a 1 m hole, or 0.9 m down hanging
+  // over the ground beside a 0.6 m hole.
+  const sliver = (y: number) => rectangle(0.45, 0.55, -0.05, 0.05, y);
+  const cases = [
+    { ground: [...floorWithHole(5, 1, 0), ...sliver(1.2)], edge: 1 },
+    { ground: [...floorWithHole(5, 1, 0), ...sliver(0.6)], edge: 1 },
+    { ground: [...floorWithHole(5, 0.6, 0), ...sliver(0.6)], edge: 0.6 },
+  ];
+
+  for (const { ground, edge } of cases) {
+    const floor = await measureWalkableFloor(collider(ground, METRIC), METRIC, []);
+
+    expect(floor.startDistance).toBeCloseTo(edge, 6);
+    expect(floor.cameraHeight).toBeCloseTo(1.5, 6);
+  }
+});
+
+test("a draft with a hole takes its scale from the nearest floor", async () => {
+  // The floor is 1 unit down, so a unit counts as 1.5 m; the hole's edge is 0.5 units away.
+  const ground = floorWithHole(4, 0.5, 0.6);
+
+  const floor = await measureWalkableFloor(collider(ground, DRAFT), DRAFT, []);
+
+  expect(floor.metresPerUnit).toBeCloseTo(1.5, 6);
+  expect(floor.startDistance).toBeCloseTo(0.75, 6);
+});
+
+/** The nearest floor to a point 1.5 up from the middle, among loose triangles. */
+function nearestAmong(pieces: Vec3[][]): Vec3 | undefined {
+  const triangles = pieces.flat();
+  const indices = triangles.map((_, index) => index);
+  return nearestFloor(triangles.flat(), indices, [0, 1.5, 0]);
+}
+
+test("the nearest floor is walkable and below the point", () => {
+  // A 45 degree step down to the floor, too steep to stand on.
+  const steepStep: Vec3[][] = [
+    [
+      [0.8, 0.2, -1],
+      [0.8, 0.2, 1],
+      [1, 0, 1],
+    ],
+    [
+      [0.8, 0.2, -1],
+      [1, 0, 1],
+      [1, 0, -1],
+    ],
+  ];
+  const pieces = [
+    ...rectangle(0.5, 1, -1, 1, 2), // a ledge above the point
+    ...rectangle(0, 0.7, -1, 1, 1.5), // level with the point, so not below it
+    ...steepStep,
+    ...rectangle(1, 3, -1, 1, 0),
+  ];
+
+  const nearest = nearestAmong(pieces);
+
+  expect(nearest?.[0]).toBeCloseTo(1, 6);
+  expect(nearest?.[1]).toBeCloseTo(0, 6);
+  expect(nearest?.[2]).toBeCloseTo(0, 6);
+});
+
+test("only points on a floor's edges count, not on the lines through them", () => {
+  // The far piece's edge along x = 0.5 points at the middle, 3 m away.
+  const pieces = [...rectangle(0.8, 3, -1, 1, 0), ...rectangle(0.5, 0.9, 3, 4, 0)];
+
+  expect(nearestAmong(pieces)?.[0]).toBeCloseTo(0.8, 6);
+});
+
+test("the nearest floor's height is the floor's height at that point", () => {
+  // A gentle slope whose nearest edge, along x = 1, rises from 0 to 0.4.
+  const slope: Vec3[] = [
+    [1, 0, -1],
+    [1, 0.4, 1],
+    [3, 0, 0],
+  ];
+
+  const nearest = nearestFloor(slope.flat(), [0, 1, 2], [0, 1.5, 0]);
+
+  expect(nearest?.[0]).toBeCloseTo(1, 6);
+  expect(nearest?.[1]).toBeCloseTo(0.2, 6);
+  expect(nearest?.[2]).toBeCloseTo(0, 6);
 });
 
 test("the floor below a point is the highest walkable surface under it", () => {
@@ -212,6 +336,6 @@ test("a photo spot whose floor is too small to stand on is refused", async () =>
   const room = [...rectangle(-0.15, 0.15, -0.15, 0.15, 0), ...rectangle(8, 12, -2, 2, 0)];
 
   await expect(measureWalkableFloor(collider(room, METRIC), METRIC, [])).rejects.toThrow(
-    "no walkable floor within a metre of the photo spot",
+    "no walkable floor within a metre of where the measurement starts",
   );
 });
