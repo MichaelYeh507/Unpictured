@@ -52,8 +52,9 @@ export function describeFloor(floor: WalkableFloor): string {
   const estimate = floor.estimated
     ? " Sizes are estimated: this world has no scale, so the photo is assumed to be 1.5 m up."
     : "";
+  // A hairline crack under the camera rounds to 0.0 m, so it isn't worth a mention.
   const start =
-    floor.startDistance > 0
+    floor.startDistance >= 0.05
       ? ` The collider has a hole under the photo spot, so this is measured from the nearest ` +
         `floor, ${about}${floor.startDistance.toFixed(1)} m away.`
       : "";

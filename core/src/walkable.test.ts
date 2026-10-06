@@ -155,7 +155,7 @@ test("a hole under the photo spot is measured from the nearest floor", async () 
   expect(floor.reachableArea).toBeCloseTo(floor.walkableArea, 6);
 });
 
-test("a floor counts as near when it is closer than twice its depth below", async () => {
+test("a floor counts as near when it is no farther away than twice its depth below", async () => {
   // The photo spot is 1.5 m up, so a floor up to 3 m away counts.
   const near = collider(floorWithHole(6, 2.8, 0), METRIC);
   const far = collider(floorWithHole(6, 3.2, 0), METRIC);
@@ -168,6 +168,24 @@ test("a floor counts as near when it is closer than twice its depth below", asyn
   );
 });
 
+test("a stray sliver in the hole is not taken for the floor", async () => {
+  // A 10 cm piece 0.45 m away: 0.3 m or 0.9 m down inside a 1 m hole, or 0.9 m down hanging
+  // over the ground beside a 0.6 m hole.
+  const sliver = (y: number) => rectangle(0.45, 0.55, -0.05, 0.05, y);
+  const cases = [
+    { ground: [...floorWithHole(5, 1, 0), ...sliver(1.2)], edge: 1 },
+    { ground: [...floorWithHole(5, 1, 0), ...sliver(0.6)], edge: 1 },
+    { ground: [...floorWithHole(5, 0.6, 0), ...sliver(0.6)], edge: 0.6 },
+  ];
+
+  for (const { ground, edge } of cases) {
+    const floor = await measureWalkableFloor(collider(ground, METRIC), METRIC, []);
+
+    expect(floor.startDistance).toBeCloseTo(edge, 6);
+    expect(floor.cameraHeight).toBeCloseTo(1.5, 6);
+  }
+});
+
 test("a draft with a hole takes its scale from the nearest floor", async () => {
   // The floor is 1 unit down, so a unit counts as 1.5 m; the hole's edge is 0.5 units away.
   const ground = floorWithHole(4, 0.5, 0.6);
@@ -178,22 +196,46 @@ test("a draft with a hole takes its scale from the nearest floor", async () => {
   expect(floor.startDistance).toBeCloseTo(0.75, 6);
 });
 
+/** The nearest floor to a point 1.5 up from the middle, among loose triangles. */
+function nearestAmong(pieces: Vec3[][]): Vec3 | undefined {
+  const triangles = pieces.flat();
+  const indices = triangles.map((_, index) => index);
+  return nearestFloor(triangles.flat(), indices, [0, 1.5, 0]);
+}
+
 test("the nearest floor is walkable and below the point", () => {
+  // A 45 degree step down to the floor, too steep to stand on.
+  const steepStep: Vec3[][] = [
+    [
+      [0.8, 0.2, -1],
+      [0.8, 0.2, 1],
+      [1, 0, 1],
+    ],
+    [
+      [0.8, 0.2, -1],
+      [1, 0, 1],
+      [1, 0, -1],
+    ],
+  ];
   const pieces = [
     ...rectangle(0.5, 1, -1, 1, 2), // a ledge above the point
-    ...rectangle(0, 1, -1, 1, 1.5), // level with the point, so not below it
-    ...wall(1, -1, 1, 0, 1), // too steep to stand on
-    ...rectangle(1.5, 3, -1, 1, 0),
+    ...rectangle(0, 0.7, -1, 1, 1.5), // level with the point, so not below it
+    ...steepStep,
+    ...rectangle(1, 3, -1, 1, 0),
   ];
-  const triangles = pieces.flat();
-  const positions = triangles.flat();
-  const indices = triangles.map((_, index) => index);
 
-  const nearest = nearestFloor(positions, indices, [0, 1.5, 0]);
+  const nearest = nearestAmong(pieces);
 
-  expect(nearest?.[0]).toBeCloseTo(1.5, 6);
+  expect(nearest?.[0]).toBeCloseTo(1, 6);
   expect(nearest?.[1]).toBeCloseTo(0, 6);
   expect(nearest?.[2]).toBeCloseTo(0, 6);
+});
+
+test("only points on a floor's edges count, not on the lines through them", () => {
+  // The far piece's edge along x = 0.5 points at the middle, 3 m away.
+  const pieces = [...rectangle(0.8, 3, -1, 1, 0), ...rectangle(0.5, 0.9, 3, 4, 0)];
+
+  expect(nearestAmong(pieces)?.[0]).toBeCloseTo(0.8, 6);
 });
 
 test("the nearest floor's height is the floor's height at that point", () => {
@@ -294,6 +336,6 @@ test("a photo spot whose floor is too small to stand on is refused", async () =>
   const room = [...rectangle(-0.15, 0.15, -0.15, 0.15, 0), ...rectangle(8, 12, -2, 2, 0)];
 
   await expect(measureWalkableFloor(collider(room, METRIC), METRIC, [])).rejects.toThrow(
-    "no walkable floor within a metre of the photo spot",
+    "no walkable floor within a metre of where the measurement starts",
   );
 });

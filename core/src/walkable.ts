@@ -30,8 +30,12 @@ const MAX_VOXELS_PER_SIDE = 2000; // keeps Recast's grid, and its memory, bounde
 const CELL = 0.1; // metres per side of the grid the floor is measured and drawn on
 const MAX_POLYGONS = 65535; // Detour's limit for one search
 const MAX_CELLS = 200_000; // larger floors get coarser cells, so the overlay stays drawable
-/** A floor beside a hole under the photo spot counts if it is this many times closer than deep. */
+/** A floor beside a hole under the photo spot counts if it is no farther away than this many
+ * times its depth below the photo spot. */
 const NEAR_FLOOR_FACTOR = 2;
+/** It must also go on at about the same height beyond its edge, for this share of its distance or
+ * depth (the larger), so a stray sliver of collider in the hole doesn't count. */
+const STANDING_ROOM = 0.25;
 
 export interface FloorCell {
   /** The middle of the cell, on the floor, in the game frame. */
@@ -49,7 +53,7 @@ export interface WalkableFloor {
   metresPerUnit: number;
   /** True when the world has no scale and sizes come from ASSUMED_CAMERA_HEIGHT. */
   estimated: boolean;
-  /** Metres from the floor up to the photo spot. */
+  /** Metres up to the photo spot from the floor the measurement starts on. */
   cameraHeight: number;
   /** Square metres. */
   walkableArea: number;
@@ -58,8 +62,8 @@ export interface WalkableFloor {
   unpicturedArea: number;
   /** Metres in a straight line, seen from above, from the photo spot to the farthest reachable cell. */
   farthest: number;
-  /** Metres, seen from above, from the photo spot to where the measurement starts: 0 unless the
-   * collider has a hole under the photo spot. */
+  /** Metres, seen from above, from the photo spot to the edge of the floor the measurement starts
+   * on: 0 unless the collider has a hole under the photo spot. */
   startDistance: number;
 }
 
@@ -133,13 +137,13 @@ function reachablePolygons(
   metresPerUnit: number,
 ): Set<number> {
   const [x, y, z] = floorPoint;
-  const extent = 1 / metresPerUnit; // search a metre around the spot
+  const extent = 1 / metresPerUnit; // search a metre around the floor point
   const start = query.findNearestPoly(
     { x, y, z },
     { halfExtents: { x: extent, y: extent / 2, z: extent } },
   );
   if (!start.success || start.nearestRef === 0) {
-    throw new Error("there is no walkable floor within a metre of the photo spot");
+    throw new Error("there is no walkable floor within a metre of where the measurement starts");
   }
   const around = query.findPolysAroundCircle(start.nearestRef, start.nearestPoint, 1e6, {
     maxPolys: MAX_POLYGONS,
@@ -277,17 +281,41 @@ export function heightBelow(
   return highest;
 }
 
-/** The nearest point of any walkable floor below a point, seen from above, for when the floor
- * has a hole straight under it. A floor farther away than NEAR_FLOOR_FACTOR times its depth
- * below the point doesn't count. */
+/** For a floor with a hole straight under a point: the nearest point, seen from above, on the
+ * edge of a walkable floor below it that is near enough (NEAR_FLOOR_FACTOR) and goes on beyond
+ * that edge (STANDING_ROOM). */
 export function nearestFloor(
   positions: ArrayLike<number>,
   indices: ArrayLike<number>,
   point: Vec3,
 ): Vec3 | undefined {
+  const edges = floorEdgesNear(positions, indices, point);
+  edges.sort((first, second) => first.distance - second.distance);
+  for (const { position, distance } of edges) {
+    const room = STANDING_ROOM * Math.max(distance, point[1] - position[1]);
+    const outward = room / distance;
+    const beyond: Vec3 = [
+      position[0] + (position[0] - point[0]) * outward,
+      point[1],
+      position[2] + (position[2] - point[2]) * outward,
+    ];
+    const beyondY = heightBelow(positions, indices, beyond);
+    if (beyondY !== undefined && Math.abs(beyondY - position[1]) <= room) {
+      return position;
+    }
+  }
+  return undefined;
+}
+
+/** The point nearest to `point`, seen from above, on each edge of the walkable floor, keeping
+ * those no farther away than NEAR_FLOOR_FACTOR times their depth (so they are below it). */
+function floorEdgesNear(
+  positions: ArrayLike<number>,
+  indices: ArrayLike<number>,
+  point: Vec3,
+): { position: Vec3; distance: number }[] {
   const steepest = Math.cos((WALKER.maxSlopeDeg * Math.PI) / 180);
-  let nearest: Vec3 | undefined;
-  let nearestDistance = Infinity;
+  const edges: { position: Vec3; distance: number }[] = [];
   for (let i = 0; i < indices.length; i += 3) {
     const a = vertex(positions, indices[i] ?? 0);
     const b = vertex(positions, indices[i + 1] ?? 0);
@@ -300,16 +328,15 @@ export function nearestFloor(
       [b, c],
       [c, a],
     ] as const) {
-      const candidate = nearestOnEdge(from, to, point[0], point[2]);
-      const distance = Math.hypot(candidate[0] - point[0], candidate[2] - point[2]);
-      const depth = point[1] - candidate[1];
-      if (depth > 0 && distance <= NEAR_FLOOR_FACTOR * depth && distance < nearestDistance) {
-        nearest = candidate;
-        nearestDistance = distance;
+      const position = nearestOnEdge(from, to, point[0], point[2]);
+      const distance = Math.hypot(position[0] - point[0], position[2] - point[2]);
+      const depth = point[1] - position[1];
+      if (distance > 0 && distance <= NEAR_FLOOR_FACTOR * depth) {
+        edges.push({ position, distance });
       }
     }
   }
-  return nearest;
+  return edges;
 }
 
 /** The point on the edge from `from` to `to` nearest to (x, z) seen from above, with its height. */
