@@ -12,6 +12,7 @@ Worlds are generated from photos with the World Labs Marble API and rendered in 
 - `core/`: engine-agnostic TypeScript (no three.js, Spark or DOM), such as coordinate frames
 - `pipeline/`: Python tools that generate and prepare world packages
 - `tests/`: language-neutral test vectors that every engine's code must pass
+- `docs/`: specifications, starting with the world package format (`docs/WORLD_PACKAGE.md`)
 
 ## Develop
 
