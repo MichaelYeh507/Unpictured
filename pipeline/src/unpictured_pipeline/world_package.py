@@ -1,6 +1,6 @@
 """Downloads a generated world into a local world package folder.
 
-The layout is provisional until docs/WORLD_PACKAGE.md is written at the end of M0.
+The layout is specified in docs/WORLD_PACKAGE.md; change it there first.
 """
 
 import json
