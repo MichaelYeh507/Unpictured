@@ -1,0 +1,363 @@
+{
+  "description": "Camera realness (docs/REALNESS.md) for points in the raw splat frame (marble_raw_opencv: x right, y down, z forward). Each case names its cameras (camera.json fields; pitch tilts up first, then yaw turns right), gives the photo spot's height above the floor in raw units, and uses `settings` unless it has its own. Several cameras: the highest realness counts. Expected values come from a separate calculation with explicit rotation matrices; the simple cases (straight ahead, frame edges, halfway through a fade) can be checked by hand. The TypeScript reference checks this file in Node and the shader checks it in a browser; a port to another engine must pass it too.",
+  "settings": {
+    "margin": 0.1,
+    "near_ok": 2,
+    "far_limit": 6
+  },
+  "cameras": {
+    "ahead": {
+      "yaw_deg": 0,
+      "pitch_deg": 0,
+      "position": [0, 0, 0],
+      "image_size": [1000, 750],
+      "fx": 500,
+      "fy": 500,
+      "cx": 500,
+      "cy": 375
+    },
+    "turned_right": {
+      "yaw_deg": 90,
+      "pitch_deg": 0,
+      "position": [0, 0, 0],
+      "image_size": [1000, 750],
+      "fx": 500,
+      "fy": 500,
+      "cx": 500,
+      "cy": 375
+    },
+    "turned_around": {
+      "yaw_deg": 180,
+      "pitch_deg": 0,
+      "position": [0, 0, 0],
+      "image_size": [1000, 750],
+      "fx": 500,
+      "fy": 500,
+      "cx": 500,
+      "cy": 375
+    },
+    "tilted_up_30": {
+      "yaw_deg": 0,
+      "pitch_deg": 30,
+      "position": [0, 0, 0],
+      "image_size": [1000, 750],
+      "fx": 500,
+      "fy": 500,
+      "cx": 500,
+      "cy": 375
+    },
+    "turned_45_tilted_down_10": {
+      "yaw_deg": 45,
+      "pitch_deg": -10,
+      "position": [0, 0, 0],
+      "image_size": [1000, 750],
+      "fx": 500,
+      "fy": 500,
+      "cx": 500,
+      "cy": 375
+    },
+    "moved_right": {
+      "yaw_deg": 0,
+      "pitch_deg": 0,
+      "position": [1, 0, 0],
+      "image_size": [1000, 750],
+      "fx": 500,
+      "fy": 500,
+      "cx": 500,
+      "cy": 375
+    },
+    "portrait": {
+      "yaw_deg": 0,
+      "pitch_deg": 0,
+      "position": [0, 0, 0],
+      "image_size": [750, 1000],
+      "fx": 500,
+      "fy": 500,
+      "cx": 375,
+      "cy": 500
+    },
+    "uneven_lens": {
+      "yaw_deg": 20,
+      "pitch_deg": 5,
+      "position": [0.5, -0.3, 0.2],
+      "image_size": [1000, 750],
+      "fx": 600,
+      "fy": 400,
+      "cx": 450,
+      "cy": 330
+    }
+  },
+  "cases": [
+    {
+      "label": "straight ahead, near",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [0, 0, 1],
+      "realness": 1.0
+    },
+    {
+      "label": "straight ahead at near_ok",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [0, 0, 2],
+      "realness": 1.0
+    },
+    {
+      "label": "straight ahead, a quarter into the range fade",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [0, 0, 3],
+      "realness": 0.84375
+    },
+    {
+      "label": "straight ahead, halfway through the range fade",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [0, 0, 4],
+      "realness": 0.5
+    },
+    {
+      "label": "straight ahead at far_limit",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [0, 0, 6],
+      "realness": 0.0
+    },
+    {
+      "label": "straight ahead, beyond far_limit",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [0, 0, 9],
+      "realness": 0.0
+    },
+    {
+      "label": "behind the camera",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [0, 0, -1],
+      "realness": 0.0
+    },
+    {
+      "label": "beside the camera, level with it",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [1, 0, 0],
+      "realness": 0.0
+    },
+    {
+      "label": "at the camera itself",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [0, 0, 0],
+      "realness": 0.0
+    },
+    {
+      "label": "on the frame's right edge",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [1, 0, 1],
+      "realness": 0.5
+    },
+    {
+      "label": "inside the right edge, past the margin",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [0.8, 0, 1],
+      "realness": 1.0
+    },
+    {
+      "label": "halfway into the margin, inside the frame",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [0.9, 0, 1],
+      "realness": 0.84375
+    },
+    {
+      "label": "halfway into the margin, outside the frame",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [1.1, 0, 1],
+      "realness": 0.15625
+    },
+    {
+      "label": "outside the frame, past the margin",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [1.4, 0, 1],
+      "realness": 0.0
+    },
+    {
+      "label": "on the frame's left edge",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [-1, 0, 1],
+      "realness": 0.5
+    },
+    {
+      "label": "on the frame's top edge (up is -y)",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [0, -0.75, 1],
+      "realness": 0.5
+    },
+    {
+      "label": "inside the bottom edge, in the margin",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [0, 0.675, 1],
+      "realness": 0.84375
+    },
+    {
+      "label": "outside a corner, in the margin on both sides",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [1.1, 0.825, 1],
+      "realness": 0.15625
+    },
+    {
+      "label": "in the margin and in the range fade",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "point": [1.8, 0, 2],
+      "realness": 0.776960352
+    },
+    {
+      "label": "turned right 90: straight ahead of it",
+      "cameras": ["turned_right"],
+      "camera_height": 1,
+      "point": [1, 0, 0],
+      "realness": 1.0
+    },
+    {
+      "label": "turned right 90: the world's front is beside it",
+      "cameras": ["turned_right"],
+      "camera_height": 1,
+      "point": [0, 0, 1],
+      "realness": 0.0
+    },
+    {
+      "label": "turned right 90: off-center to its left",
+      "cameras": ["turned_right"],
+      "camera_height": 1,
+      "point": [1, 0, 0.5],
+      "realness": 1.0
+    },
+    {
+      "label": "tilted up 30: straight ahead of it",
+      "cameras": ["tilted_up_30"],
+      "camera_height": 1,
+      "point": [0, -0.5, 0.8660254037844386],
+      "realness": 1.0
+    },
+    {
+      "label": "tilted up 30: a little below level is in its bottom margin",
+      "cameras": ["tilted_up_30"],
+      "camera_height": 1,
+      "point": [0, 0.1, 1],
+      "realness": 0.653495364
+    },
+    {
+      "label": "turned 45 and tilted down 10: near its top-left corner",
+      "cameras": ["turned_45_tilted_down_10"],
+      "camera_height": 1,
+      "point": [0.090936, -0.395176, 1.12941],
+      "realness": 0.718253023
+    },
+    {
+      "label": "camera away from the origin: straight ahead of it",
+      "cameras": ["moved_right"],
+      "camera_height": 1,
+      "point": [1, 0, 1.5],
+      "realness": 1.0
+    },
+    {
+      "label": "camera away from the origin: off-center and in the range fade",
+      "cameras": ["moved_right"],
+      "camera_height": 1,
+      "point": [0, 0, 2],
+      "realness": 0.989962096
+    },
+    {
+      "label": "portrait photo: on its right edge",
+      "cameras": ["portrait"],
+      "camera_height": 1,
+      "point": [0.75, 0, 1],
+      "realness": 0.5
+    },
+    {
+      "label": "uneven lens, off-center: near its right edge",
+      "cameras": ["uneven_lens"],
+      "camera_height": 1,
+      "point": [1.373245, -0.351742, 0.684526],
+      "realness": 0.718253903
+    },
+    {
+      "label": "uneven lens, off-center: near its top edge",
+      "cameras": ["uneven_lens"],
+      "camera_height": 1,
+      "point": [0.873858, -1.327211, 1.227166],
+      "realness": 0.648000206
+    },
+    {
+      "label": "uneven lens, off-center: at its image center, in the range fade",
+      "cameras": ["uneven_lens"],
+      "camera_height": 1,
+      "point": [1.862875, -0.648623, 3.944467],
+      "realness": 0.500000029
+    },
+    {
+      "label": "camera height 2 doubles the distances",
+      "cameras": ["ahead"],
+      "camera_height": 2,
+      "point": [0, 0, 8],
+      "realness": 0.5
+    },
+    {
+      "label": "camera height 0.5 halves them",
+      "cameras": ["ahead"],
+      "camera_height": 0.5,
+      "point": [0, 0, 1.5],
+      "realness": 0.84375
+    },
+    {
+      "label": "a narrower margin",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "settings": {
+        "margin": 0.02,
+        "near_ok": 2,
+        "far_limit": 6
+      },
+      "point": [0.98, 0, 1],
+      "realness": 0.84375
+    },
+    {
+      "label": "two photos: only the second sees it",
+      "cameras": ["ahead", "turned_around"],
+      "camera_height": 1,
+      "point": [0, 0, -1],
+      "realness": 1.0
+    },
+    {
+      "label": "two photos: both see it, the higher counts",
+      "cameras": ["ahead", "turned_right"],
+      "camera_height": 1,
+      "point": [1.05, 0, 1],
+      "realness": 0.675197063
+    },
+    {
+      "label": "two photos: both see it, the first is higher",
+      "cameras": ["ahead", "turned_right"],
+      "camera_height": 1,
+      "point": [0.95, 0, 1],
+      "realness": 0.68359375
+    },
+    {
+      "label": "two photos: neither sees it",
+      "cameras": ["ahead", "turned_right"],
+      "camera_height": 1,
+      "point": [-1, 0, -1],
+      "realness": 0.0
+    }
+  ]
+}

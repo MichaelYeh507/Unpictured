@@ -1,4 +1,4 @@
-import { SparkControls, SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
+import { type GsplatModifier, SparkControls, SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
 import {
   isSplatDetail,
   isWorldName,
@@ -6,20 +6,25 @@ import {
   parseCameraFile,
   parseGlbMesh,
   parseWorldMeta,
+  photoSpotHeight,
   pickSplatFile,
   placeWorld,
+  REALNESS_SETTINGS,
   SPLAT_DETAILS,
   sourceCameraPosition,
+  type TriangleMesh,
   type WorldPlacement,
 } from "@unpictured/core";
 import * as THREE from "three";
 import { buildPhotoFrame, fieldOfViewFor } from "./photoFrames.ts";
+import { realnessHeatmap } from "./realnessShader.ts";
 import { buildFloorOverlay, describeFloor } from "./walkableFloor.ts";
 
 const statusLine = requireElement("status");
 const positionLine = requireElement("position");
 const noticeLine = requireElement("notice");
 const walkableLine = requireElement("walkable");
+const realnessLine = requireElement("realness");
 
 // Spark renders splats without MSAA.
 const renderer = new THREE.WebGLRenderer({ antialias: false });
@@ -118,12 +123,14 @@ async function loadWorld(): Promise<void> {
     camera.lookAt(firstFrame.center);
   }
   const colliderFile = meta.files.collider;
-  const walkable = new WalkableFloorToggle(
-    `/worlds/${name}/${colliderFile}`,
-    placement,
-    photoCameras,
-  );
+  const loadCollider = colliderLoader(`/worlds/${name}/${colliderFile}`);
+  const walkable = new WalkableFloorToggle(loadCollider, placement, photoCameras);
+  const realness = new RealnessToggle(splats, loadCollider, placement, photoCameras);
+  const canShowRealness = colliderFile !== undefined && photoCameras.length > 0;
   window.addEventListener("keydown", (event) => {
+    if (event.repeat) {
+      return; // a held key toggles once
+    }
     if (event.code === "KeyO") {
       for (const frame of frames) {
         frame.overlay.visible = !frame.overlay.visible;
@@ -132,25 +139,33 @@ async function loadWorld(): Promise<void> {
     if (event.code === "KeyN" && colliderFile !== undefined) {
       void walkable.toggle();
     }
+    if (event.code === "KeyR" && canShowRealness) {
+      void realness.toggle();
+    }
   });
 
   await splats.initialized;
   const photoHint = frames.length > 0 ? ", O shows the photo in its frame" : "";
   const floorHint = colliderFile !== undefined ? ", N shows the walkable floor" : "";
-  statusLine.textContent = `${name} (${splatFile}): drag to look, W A S D to move, E up, Q down${photoHint}${floorHint}`;
+  const realnessHint = canShowRealness ? ", R shows how real each splat is" : "";
+  statusLine.textContent = `${name} (${splatFile}): drag to look, W A S D to move, E up, Q down${photoHint}${floorHint}${realnessHint}`;
 }
 
 /** Measures the walkable floor the first time it is asked for, then shows or hides it. */
 class WalkableFloorToggle {
-  private readonly colliderUrl: string;
+  private readonly loadCollider: () => Promise<TriangleMesh>;
   private readonly placement: WorldPlacement;
   private readonly photoCameras: PhotoCamera[];
   private overlay: THREE.Mesh | undefined;
   private description = "";
   private measuring = false;
 
-  constructor(colliderUrl: string, placement: WorldPlacement, photoCameras: PhotoCamera[]) {
-    this.colliderUrl = colliderUrl;
+  constructor(
+    loadCollider: () => Promise<TriangleMesh>,
+    placement: WorldPlacement,
+    photoCameras: PhotoCamera[],
+  ) {
+    this.loadCollider = loadCollider;
     this.placement = placement;
     this.photoCameras = photoCameras;
   }
@@ -168,14 +183,10 @@ class WalkableFloorToggle {
     walkableLine.textContent = "Measuring the walkable floor...";
     try {
       // Loaded only now: the navigation library is about 760 kB.
-      const [{ measureWalkableFloor }, response] = await Promise.all([
+      const [{ measureWalkableFloor }, collider] = await Promise.all([
         import("@unpictured/core/walkable"),
-        fetch(this.colliderUrl),
+        this.loadCollider(),
       ]);
-      if (!response.ok) {
-        throw new Error(`${this.colliderUrl}: HTTP ${response.status}`);
-      }
-      const collider = parseGlbMesh(await response.arrayBuffer());
       const floor = await measureWalkableFloor(collider, this.placement, this.photoCameras);
       this.overlay = buildFloorOverlay(floor);
       scene.add(this.overlay);
@@ -187,6 +198,80 @@ class WalkableFloorToggle {
       this.measuring = false;
     }
   }
+}
+
+/** Colors every splat by how real it is (blue seen by a photo, pink imagined), working out the
+ * photo spot's height above the floor the first time; after that it shows or hides the colors. */
+class RealnessToggle {
+  private readonly splats: SplatMesh;
+  private readonly loadCollider: () => Promise<TriangleMesh>;
+  private readonly placement: WorldPlacement;
+  private readonly photoCameras: PhotoCamera[];
+  private heatmap: GsplatModifier | undefined;
+  private shown = false;
+  private preparing = false;
+
+  constructor(
+    splats: SplatMesh,
+    loadCollider: () => Promise<TriangleMesh>,
+    placement: WorldPlacement,
+    photoCameras: PhotoCamera[],
+  ) {
+    this.splats = splats;
+    this.loadCollider = loadCollider;
+    this.placement = placement;
+    this.photoCameras = photoCameras;
+  }
+
+  async toggle(): Promise<void> {
+    if (this.preparing) {
+      return;
+    }
+    if (this.heatmap === undefined) {
+      this.preparing = true;
+      realnessLine.textContent = "Working out how real each splat is...";
+      try {
+        const cameraHeight = photoSpotHeight(await this.loadCollider(), this.placement);
+        if (cameraHeight === undefined) {
+          throw new Error("the collider has no floor below or near the photo spot");
+        }
+        this.heatmap = realnessHeatmap(this.photoCameras, cameraHeight, REALNESS_SETTINGS);
+      } catch (error) {
+        realnessLine.textContent = `Could not show realness: ${errorMessage(error)}`;
+        return;
+      } finally {
+        this.preparing = false;
+      }
+    }
+    this.shown = !this.shown;
+    this.splats.objectModifier = this.shown ? this.heatmap : undefined;
+    this.splats.updateGenerator();
+    const { nearOk, farLimit } = REALNESS_SETTINGS;
+    realnessLine.textContent = this.shown
+      ? `Realness: blue was in a photo, pink is imagined. Real up to ${nearOk} camera heights ` +
+        `from the photo spot, imagined from ${farLimit}.`
+      : "";
+  }
+}
+
+/** Fetches and parses the collider once, for whichever view asks first. A failed attempt is
+ * forgotten, so the next key press tries again. */
+function colliderLoader(url: string): () => Promise<TriangleMesh> {
+  let collider: Promise<TriangleMesh> | undefined;
+  return () => {
+    collider ??= fetch(url)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`${url}: HTTP ${response.status}`);
+        }
+        return parseGlbMesh(await response.arrayBuffer());
+      })
+      .catch((error: unknown) => {
+        collider = undefined;
+        throw error;
+      });
+    return collider;
+  };
 }
 
 /** The world's camera.json, or no cameras when `locate` has not been run for it. */
