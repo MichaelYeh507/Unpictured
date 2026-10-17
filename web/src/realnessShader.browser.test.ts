@@ -3,13 +3,13 @@ import {
   cameraRealness,
   type PhotoCamera,
   parseCameraFile,
-  type RealnessSettings,
+  REALNESS_SETTINGS,
   type Vec3,
 } from "@unpictured/core";
 import * as THREE from "three";
 import { afterAll, afterEach, describe, expect, test } from "vitest";
 import vectors from "../../tests/realness_vectors.json" with { type: "json" };
-import { realnessHeatmap, realnessOf } from "./realnessShader.ts";
+import { heatmapColor, realnessHeatmap, realnessOf } from "./realnessShader.ts";
 
 type VectorCase = (typeof vectors.cases)[number] & {
   settings?: { margin: number; near_ok: number; far_limit: number };
@@ -80,7 +80,7 @@ test("the heatmap modifier colors sample splats by the reference realness", asyn
     { yaw_deg: 180, pitch_deg: -13, position: [0, 0, 0], ...lens },
   ]);
   const cameraHeight = 1.44;
-  const settings: RealnessSettings = { margin: 0.05, nearOk: 3, farLimit: 10 };
+  const settings = REALNESS_SETTINGS; // what the viewer runs
 
   const count = 2000;
   const splats = new PackedSplats();
@@ -90,7 +90,7 @@ test("the heatmap modifier colors sample splats by the reference realness", asyn
     return seed / 2 ** 31;
   };
   for (let i = 0; i < count; i++) {
-    const reach = 16 * cameraHeight;
+    const reach = 30 * cameraHeight; // past farLimit, so the whole fade is sampled
     const center = new THREE.Vector3(
       (random() * 2 - 1) * reach,
       (random() * 2 - 1) * reach * 0.3,
@@ -130,4 +130,33 @@ test("the heatmap modifier colors sample splats by the reference realness", asyn
   }
   // The sample must reach the soft edges, not only the plainly seen and plainly imagined.
   expect(partly).toBeGreaterThan(50);
+});
+
+test("the heatmap shades its color by the splat's own brightness", async () => {
+  const real = [0x4a / 255, 0x9e / 255, 0xff / 255];
+  const imagined = [0xff / 255, 0x5a / 255, 0xb4 / 255];
+  const originals: [number, number, number][] = [
+    [1, 1, 1],
+    [0.5, 0.5, 0.5],
+    [1, 0, 0],
+    [0.2, 0.6, 0.9],
+  ];
+  for (const realness of [0, 0.5, 1]) {
+    for (const original of originals) {
+      const rgb = heatmapColor(dyno.dynoConst("float", realness), dyno.dynoConst("vec3", original));
+      const { r, g, b } = dyno.split(rgb).outputs;
+      const shown = await Promise.all([r, g, b].map((channel) => gpuFloats(1, () => channel)));
+      const [red = 0, green = 0, blue = 0] = original;
+      const brightness = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      [0, 1, 2].forEach((channel) => {
+        const heat =
+          (imagined[channel] ?? 0) + ((real[channel] ?? 0) - (imagined[channel] ?? 0)) * realness;
+        const expected = heat * (0.35 + 0.65 * brightness);
+        expect(shown[channel]?.[0], `realness ${realness}, color ${original}`).toBeCloseTo(
+          expected,
+          5,
+        );
+      });
+    }
+  }
 });

@@ -128,6 +128,9 @@ async function loadWorld(): Promise<void> {
   const realness = new RealnessToggle(splats, loadCollider, placement, photoCameras);
   const canShowRealness = colliderFile !== undefined && photoCameras.length > 0;
   window.addEventListener("keydown", (event) => {
+    if (event.repeat) {
+      return; // a held key toggles once
+    }
     if (event.code === "KeyO") {
       for (const frame of frames) {
         frame.overlay.visible = !frame.overlay.visible;
@@ -251,16 +254,22 @@ class RealnessToggle {
   }
 }
 
-/** Fetches and parses the collider once, for whichever view asks first. */
+/** Fetches and parses the collider once, for whichever view asks first. A failed attempt is
+ * forgotten, so the next key press tries again. */
 function colliderLoader(url: string): () => Promise<TriangleMesh> {
   let collider: Promise<TriangleMesh> | undefined;
   return () => {
-    collider ??= fetch(url).then(async (response) => {
-      if (!response.ok) {
-        throw new Error(`${url}: HTTP ${response.status}`);
-      }
-      return parseGlbMesh(await response.arrayBuffer());
-    });
+    collider ??= fetch(url)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`${url}: HTTP ${response.status}`);
+        }
+        return parseGlbMesh(await response.arrayBuffer());
+      })
+      .catch((error: unknown) => {
+        collider = undefined;
+        throw error;
+      });
     return collider;
   };
 }

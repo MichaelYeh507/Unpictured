@@ -34,7 +34,7 @@ export function cameraRealness(
 }
 
 /** One photo's realness for a point: inside its frame (with a soft edge) times near enough. */
-export function photoRealness(
+function photoRealness(
   rawPoint: Vec3,
   camera: PhotoCamera,
   cameraHeight: number,
@@ -62,10 +62,12 @@ export function smoothstep(edge0: number, edge1: number, x: number): number {
 
 /** The shader has no way to report bad inputs, so they are refused here instead. */
 export function checkRealnessInputs(cameraHeight: number, settings: RealnessSettings): void {
-  if (!(cameraHeight > 0)) {
-    throw new Error("realness: the camera height must be above 0");
+  if (!(cameraHeight > 0) || !Number.isFinite(cameraHeight)) {
+    throw new Error("realness: the camera height must be a finite number above 0");
   }
-  if (!(settings.margin > 0) || !(settings.nearOk >= 0) || !(settings.farLimit > settings.nearOk)) {
-    throw new Error("realness: needs margin > 0 and 0 <= nearOk < farLimit");
+  const { margin, nearOk, farLimit } = settings;
+  const finite = [margin, nearOk, farLimit].every(Number.isFinite);
+  if (!finite || !(margin > 0) || !(nearOk >= 0) || !(farLimit > nearOk)) {
+    throw new Error("realness: needs finite settings with margin > 0 and 0 <= nearOk < farLimit");
   }
 }

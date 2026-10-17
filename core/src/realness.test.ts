@@ -51,11 +51,16 @@ test("inputs the shader cannot handle are refused", () => {
   expect(() => checkRealnessInputs(1, REALNESS_SETTINGS)).not.toThrow();
   expect(() => checkRealnessInputs(0, REALNESS_SETTINGS)).toThrow(/camera height/);
   expect(() => checkRealnessInputs(Number.NaN, REALNESS_SETTINGS)).toThrow(/camera height/);
+  expect(() => checkRealnessInputs(Number.POSITIVE_INFINITY, REALNESS_SETTINGS)).toThrow(
+    /camera height/,
+  );
   const bad: RealnessSettings[] = [
     { margin: 0, nearOk: 3, farLimit: 10 },
     { margin: 0.05, nearOk: -1, farLimit: 10 },
     { margin: 0.05, nearOk: 10, farLimit: 10 },
     { margin: 0.05, nearOk: 3, farLimit: Number.NaN },
+    { margin: 0.05, nearOk: 3, farLimit: Number.POSITIVE_INFINITY },
+    { margin: Number.POSITIVE_INFINITY, nearOk: 3, farLimit: 10 },
   ];
   for (const settings of bad) {
     expect(() => checkRealnessInputs(1, settings)).toThrow(/margin/);

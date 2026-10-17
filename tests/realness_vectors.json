@@ -75,6 +75,16 @@
       "fy": 500,
       "cx": 375,
       "cy": 500
+    },
+    "uneven_lens": {
+      "yaw_deg": 20,
+      "pitch_deg": 5,
+      "position": [0.5, -0.3, 0.2],
+      "image_size": [1000, 750],
+      "fx": 600,
+      "fy": 400,
+      "cx": 450,
+      "cy": 330
     }
   },
   "cases": [
@@ -273,6 +283,27 @@
       "camera_height": 1,
       "point": [0.75, 0, 1],
       "realness": 0.5
+    },
+    {
+      "label": "uneven lens, off-center: near its right edge",
+      "cameras": ["uneven_lens"],
+      "camera_height": 1,
+      "point": [1.373245, -0.351742, 0.684526],
+      "realness": 0.718253903
+    },
+    {
+      "label": "uneven lens, off-center: near its top edge",
+      "cameras": ["uneven_lens"],
+      "camera_height": 1,
+      "point": [0.873858, -1.327211, 1.227166],
+      "realness": 0.648000206
+    },
+    {
+      "label": "uneven lens, off-center: at its image center, in the range fade",
+      "cameras": ["uneven_lens"],
+      "camera_height": 1,
+      "point": [1.862875, -0.648623, 3.944467],
+      "realness": 0.500000029
     },
     {
       "label": "camera height 2 doubles the distances",
