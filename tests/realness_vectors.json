@@ -1,9 +1,10 @@
 {
-  "description": "Camera realness (docs/REALNESS.md) for points in the raw splat frame (marble_raw_opencv: x right, y down, z forward). Each case names its cameras (camera.json fields; pitch tilts up first, then yaw turns right), gives the photo spot's height above the floor in raw units, and uses `settings` unless it has its own. Several cameras: the highest realness counts. Expected values come from a separate calculation with explicit rotation matrices; the simple cases (straight ahead, frame edges, halfway through a fade) can be checked by hand. The TypeScript reference checks this file in Node and the shader checks it in a browser; a port to another engine must pass it too.",
+  "description": "Realness (docs/REALNESS.md) for points in the raw splat frame (marble_raw_opencv: x right, y down, z forward). Each case names its cameras (camera.json fields; pitch tilts up first, then yaw turns right), gives the photo spot's height above the floor in raw units, may list memory lights (raw position and radius), and uses `settings` unless it has its own. The highest realness over the cameras and the lights counts. Expected values come from a separate calculation with explicit rotation matrices; the simple cases (straight ahead, frame edges, halfway through a fade) can be checked by hand. The TypeScript reference checks this file in Node and the shader checks it in a browser; a port to another engine must pass it too.",
   "settings": {
     "margin": 0.1,
     "near_ok": 2,
-    "far_limit": 6
+    "far_limit": 6,
+    "light_core": 0.7
   },
   "cameras": {
     "ahead": {
@@ -326,7 +327,8 @@
       "settings": {
         "margin": 0.02,
         "near_ok": 2,
-        "far_limit": 6
+        "far_limit": 6,
+        "light_core": 0.7
       },
       "point": [0.98, 0, 1],
       "realness": 0.84375
@@ -358,6 +360,217 @@
       "camera_height": 1,
       "point": [-1, 0, -1],
       "realness": 0.0
+    },
+    {
+      "label": "a light: at its center",
+      "cameras": [],
+      "camera_height": 1,
+      "lights": [
+        {
+          "position": [0.4, -0.3, 5],
+          "radius": 2
+        }
+      ],
+      "point": [0.4, -0.3, 5],
+      "realness": 1.0
+    },
+    {
+      "label": "a light: at the edge of its core",
+      "cameras": [],
+      "camera_height": 1,
+      "lights": [
+        {
+          "position": [0.4, -0.3, 5],
+          "radius": 2
+        }
+      ],
+      "point": [0.4, -0.3, 6.4],
+      "realness": 1.0
+    },
+    {
+      "label": "a light: halfway through its fade",
+      "cameras": [],
+      "camera_height": 1,
+      "lights": [
+        {
+          "position": [0.4, -0.3, 5],
+          "radius": 2
+        }
+      ],
+      "point": [0.4, 1.4, 5],
+      "realness": 0.5
+    },
+    {
+      "label": "a light: at its radius",
+      "cameras": [],
+      "camera_height": 1,
+      "lights": [
+        {
+          "position": [0.4, -0.3, 5],
+          "radius": 2
+        }
+      ],
+      "point": [2.4, -0.3, 5],
+      "realness": 0.0
+    },
+    {
+      "label": "a light: in its fade, off every axis",
+      "cameras": [],
+      "camera_height": 1,
+      "lights": [
+        {
+          "position": [0.4, -0.3, 5],
+          "radius": 2
+        }
+      ],
+      "point": [1.4, 0.9, 5.3],
+      "realness": 0.761382191
+    },
+    {
+      "label": "two lights: the first is higher",
+      "cameras": [],
+      "camera_height": 1,
+      "lights": [
+        {
+          "position": [0, 0, 5],
+          "radius": 1
+        },
+        {
+          "position": [2, 0, 5],
+          "radius": 1.5
+        }
+      ],
+      "point": [0.75, 0, 5],
+      "realness": 0.925925926
+    },
+    {
+      "label": "two lights: the second is higher",
+      "cameras": [],
+      "camera_height": 1,
+      "lights": [
+        {
+          "position": [0, 0, 5],
+          "radius": 1
+        },
+        {
+          "position": [2, 0, 5],
+          "radius": 1.5
+        }
+      ],
+      "point": [0.9, 0, 5],
+      "realness": 0.965706447
+    },
+    {
+      "label": "a light where no photo looks",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "lights": [
+        {
+          "position": [0, 0, -1.8],
+          "radius": 1
+        }
+      ],
+      "point": [0, 0, -1],
+      "realness": 0.740740741
+    },
+    {
+      "label": "a photo and a light: the photo is higher",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "lights": [
+        {
+          "position": [0, 0, 3.8],
+          "radius": 1
+        }
+      ],
+      "point": [0, 0, 3],
+      "realness": 0.84375
+    },
+    {
+      "label": "a photo and a light: the light is higher",
+      "cameras": ["ahead"],
+      "camera_height": 1,
+      "lights": [
+        {
+          "position": [0, 0, 4.5],
+          "radius": 1
+        }
+      ],
+      "point": [0, 0, 4],
+      "realness": 1.0
+    },
+    {
+      "label": "eight lights: the last one reaches the point",
+      "cameras": [],
+      "camera_height": 1,
+      "lights": [
+        {
+          "position": [0.0, 0.5, 4.0],
+          "radius": 0.4
+        },
+        {
+          "position": [1.0, 0.5, 4.0],
+          "radius": 0.4
+        },
+        {
+          "position": [2.0, 0.5, 4.0],
+          "radius": 0.4
+        },
+        {
+          "position": [3.0, 0.5, 4.0],
+          "radius": 0.4
+        },
+        {
+          "position": [4.0, 0.5, 4.0],
+          "radius": 0.4
+        },
+        {
+          "position": [5.0, 0.5, 4.0],
+          "radius": 0.4
+        },
+        {
+          "position": [6.0, 0.5, 4.0],
+          "radius": 0.4
+        },
+        {
+          "position": [7.0, 0.5, 4.0],
+          "radius": 0.4
+        }
+      ],
+      "point": [7.0, 0.5, 4.2],
+      "realness": 1.0
+    },
+    {
+      "label": "a light beyond its reach, with no photos",
+      "cameras": [],
+      "camera_height": 1,
+      "lights": [
+        {
+          "position": [0, 0, 5],
+          "radius": 1
+        }
+      ],
+      "point": [0, 3, 5],
+      "realness": 0.0
+    },
+    {
+      "label": "a light with no core fades from its center",
+      "cameras": [],
+      "camera_height": 1,
+      "settings": {
+        "margin": 0.1,
+        "near_ok": 2,
+        "far_limit": 6,
+        "light_core": 0
+      },
+      "lights": [
+        {
+          "position": [0, 0, 5],
+          "radius": 2
+        }
+      ],
+      "point": [0, 0, 6],
+      "realness": 0.5
     }
   ]
 }

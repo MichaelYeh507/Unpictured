@@ -2,6 +2,8 @@ import { type GsplatModifier, SparkControls, SparkRenderer, SplatMesh } from "@s
 import {
   isSplatDetail,
   isWorldName,
+  MAX_LIGHTS,
+  type MemoryLight,
   type PhotoCamera,
   parseCameraFile,
   parseGlbMesh,
@@ -13,11 +15,13 @@ import {
   SPLAT_DETAILS,
   sourceCameraPosition,
   type TriangleMesh,
+  toRawFrame,
+  type Vec3,
   type WorldPlacement,
 } from "@unpictured/core";
 import * as THREE from "three";
 import { buildPhotoFrame, fieldOfViewFor } from "./photoFrames.ts";
-import { realnessHeatmap } from "./realnessShader.ts";
+import { RealnessLights, realnessHeatmap } from "./realnessShader.ts";
 import { buildFloorOverlay, describeFloor } from "./walkableFloor.ts";
 
 const statusLine = requireElement("status");
@@ -142,12 +146,24 @@ async function loadWorld(): Promise<void> {
     if (event.code === "KeyR" && canShowRealness) {
       void realness.toggle();
     }
+    if (event.code === "KeyL" && canShowRealness) {
+      if (event.shiftKey) {
+        realness.clearLights();
+      } else {
+        void dropLightWhereLooking(realness, splats, placement);
+      }
+    }
+    if ((event.code === "BracketLeft" || event.code === "BracketRight") && canShowRealness) {
+      realness.resizeLight(event.code === "BracketRight" ? 2 : 0.5);
+    }
   });
 
   await splats.initialized;
   const photoHint = frames.length > 0 ? ", O shows the photo in its frame" : "";
   const floorHint = colliderFile !== undefined ? ", N shows the walkable floor" : "";
-  const realnessHint = canShowRealness ? ", R shows how real each splat is" : "";
+  const realnessHint = canShowRealness
+    ? ", R shows how real each splat is, L drops a light where you look"
+    : "";
   statusLine.textContent = `${name} (${splatFile}): drag to look, W A S D to move, E up, Q down${photoHint}${floorHint}${realnessHint}`;
 }
 
@@ -200,16 +216,21 @@ class WalkableFloorToggle {
   }
 }
 
-/** Colors every splat by how real it is (blue seen by a photo, pink imagined), working out the
- * photo spot's height above the floor the first time; after that it shows or hides the colors. */
+/** Colors every splat by how real it is (blue seen by a photo or near a memory light, pink
+ * imagined), working out the photo spot's height above the floor the first time. Test lights are
+ * sized in camera heights and placed in the raw frame. */
 class RealnessToggle {
   private readonly splats: SplatMesh;
   private readonly loadCollider: () => Promise<TriangleMesh>;
   private readonly placement: WorldPlacement;
   private readonly photoCameras: PhotoCamera[];
+  private readonly lights = new RealnessLights();
   private heatmap: GsplatModifier | undefined;
+  private cameraHeight = 1;
   private shown = false;
   private preparing = false;
+  /** The newest light's radius, and the next one's, in camera heights. */
+  private lightSize = 1;
 
   constructor(
     splats: SplatMesh,
@@ -224,34 +245,112 @@ class RealnessToggle {
   }
 
   async toggle(): Promise<void> {
-    if (this.preparing) {
+    if (await this.prepare()) {
+      this.show(!this.shown);
+    }
+  }
+
+  /** Adds a light at a raw-frame point, showing realness if it is hidden. When all MAX_LIGHTS
+   * are in use, the oldest one goes. */
+  async dropLight(rawPoint: Vec3): Promise<void> {
+    if (!(await this.prepare())) {
       return;
     }
-    if (this.heatmap === undefined) {
-      this.preparing = true;
-      realnessLine.textContent = "Working out how real each splat is...";
-      try {
-        const cameraHeight = photoSpotHeight(await this.loadCollider(), this.placement);
-        if (cameraHeight === undefined) {
-          throw new Error("the collider has no floor below or near the photo spot");
-        }
-        this.heatmap = realnessHeatmap(this.photoCameras, cameraHeight, REALNESS_SETTINGS);
-      } catch (error) {
-        realnessLine.textContent = `Could not show realness: ${errorMessage(error)}`;
-        return;
-      } finally {
-        this.preparing = false;
-      }
-    }
-    this.shown = !this.shown;
-    this.splats.objectModifier = this.shown ? this.heatmap : undefined;
-    this.splats.updateGenerator();
-    const { nearOk, farLimit } = REALNESS_SETTINGS;
-    realnessLine.textContent = this.shown
-      ? `Realness: blue was in a photo, pink is imagined. Real up to ${nearOk} camera heights ` +
-        `from the photo spot, imagined from ${farLimit}.`
-      : "";
+    const light: MemoryLight = { position: rawPoint, radius: this.lightSize * this.cameraHeight };
+    const kept = this.lights.lights.slice(-(MAX_LIGHTS - 1));
+    this.lights.set([...kept, light], REALNESS_SETTINGS);
+    this.splats.updateVersion();
+    this.show(true);
   }
+
+  clearLights(): void {
+    this.lights.set([], REALNESS_SETTINGS);
+    this.splats.updateVersion();
+    this.describe();
+  }
+
+  /** Resizes the newest light at once, so the change shows, and sizes the lights after it. */
+  resizeLight(factor: number): void {
+    this.lightSize = Math.min(8, Math.max(1 / 8, this.lightSize * factor));
+    const lights = [...this.lights.lights];
+    const newest = lights.pop();
+    if (newest !== undefined) {
+      const radius = this.lightSize * this.cameraHeight;
+      this.lights.set([...lights, { ...newest, radius }], REALNESS_SETTINGS);
+      this.splats.updateVersion();
+    }
+    this.describe();
+  }
+
+  /** Builds the heatmap the first time; false (with the reason on screen) if it cannot. */
+  private async prepare(): Promise<boolean> {
+    if (this.heatmap !== undefined) {
+      return true;
+    }
+    if (this.preparing) {
+      return false;
+    }
+    this.preparing = true;
+    realnessLine.textContent = "Working out how real each splat is...";
+    try {
+      const cameraHeight = photoSpotHeight(await this.loadCollider(), this.placement);
+      if (cameraHeight === undefined) {
+        throw new Error("the collider has no floor below or near the photo spot");
+      }
+      this.cameraHeight = cameraHeight;
+      this.heatmap = realnessHeatmap(
+        this.photoCameras,
+        cameraHeight,
+        REALNESS_SETTINGS,
+        this.lights,
+      );
+      return true;
+    } catch (error) {
+      realnessLine.textContent = `Could not show realness: ${errorMessage(error)}`;
+      return false;
+    } finally {
+      this.preparing = false;
+    }
+  }
+
+  private show(shown: boolean): void {
+    if (shown !== this.shown) {
+      this.shown = shown;
+      this.splats.objectModifier = shown ? this.heatmap : undefined;
+      this.splats.updateGenerator();
+    }
+    this.describe();
+  }
+
+  private describe(): void {
+    if (!this.shown) {
+      realnessLine.textContent = "";
+      return;
+    }
+    const { nearOk, farLimit } = REALNESS_SETTINGS;
+    const size = this.lightSize === 1 ? "1 camera height" : `${this.lightSize} camera heights`;
+    realnessLine.textContent =
+      `Realness: blue was in a photo or is near a light, pink is imagined. Real up to ${nearOk} ` +
+      `camera heights from the photo spot, imagined from ${farLimit}. L drops a light where you ` +
+      `look, [ and ] shrink or grow the newest one (now ${size}, from 1/8 to 8), Shift+L clears. ` +
+      `Lights: ${this.lights.lights.length} of ${MAX_LIGHTS}.`;
+  }
+}
+
+/** Drops a test light on the splat at the middle of the screen. */
+async function dropLightWhereLooking(
+  realness: RealnessToggle,
+  splats: SplatMesh,
+  placement: WorldPlacement,
+): Promise<void> {
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+  const [hit] = raycaster.intersectObject(splats, false);
+  if (hit === undefined) {
+    realnessLine.textContent = "Nothing in the middle of the screen to light.";
+    return;
+  }
+  await realness.dropLight(toRawFrame([hit.point.x, hit.point.y, hit.point.z], placement));
 }
 
 /** Fetches and parses the collider once, for whichever view asks first. A failed attempt is

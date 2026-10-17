@@ -4,14 +4,20 @@ import { type PhotoCamera, parseCameraFile } from "./camera.ts";
 import type { Vec3 } from "./frames.ts";
 import {
   cameraRealness,
+  checkLights,
   checkRealnessInputs,
+  MAX_LIGHTS,
+  type MemoryLight,
   REALNESS_SETTINGS,
   type RealnessSettings,
+  realness,
   smoothstep,
 } from "./realness.ts";
 
+type VectorSettings = { margin: number; near_ok: number; far_limit: number; light_core: number };
 type VectorCase = (typeof vectors.cases)[number] & {
-  settings?: { margin: number; near_ok: number; far_limit: number };
+  settings?: VectorSettings;
+  lights?: { position: number[]; radius: number }[];
 };
 
 /** The case's cameras, read through the same parser as a package's camera.json. */
@@ -22,8 +28,15 @@ function casePhotoCameras(names: string[]): PhotoCamera[] {
 }
 
 function caseSettings(testCase: VectorCase): RealnessSettings {
-  const { margin, near_ok, far_limit } = testCase.settings ?? vectors.settings;
-  return { margin, nearOk: near_ok, farLimit: far_limit };
+  const { margin, near_ok, far_limit, light_core } = testCase.settings ?? vectors.settings;
+  return { margin, nearOk: near_ok, farLimit: far_limit, lightCore: light_core };
+}
+
+function caseLights(testCase: VectorCase): MemoryLight[] {
+  return (testCase.lights ?? []).map(({ position: [x = 0, y = 0, z = 0], radius }) => ({
+    position: [x, y, z],
+    radius,
+  }));
 }
 
 describe.each(vectors.cases as VectorCase[])("realness: $label", (testCase) => {
@@ -31,8 +44,9 @@ describe.each(vectors.cases as VectorCase[])("realness: $label", (testCase) => {
     const [x = 0, y = 0, z = 0] = testCase.point;
     const point: Vec3 = [x, y, z];
     const cameras = casePhotoCameras(testCase.cameras);
-    const realness = cameraRealness(point, cameras, testCase.camera_height, caseSettings(testCase));
-    expect(realness).toBeCloseTo(testCase.realness, 8);
+    const lights = caseLights(testCase);
+    const value = realness(point, cameras, testCase.camera_height, lights, caseSettings(testCase));
+    expect(value).toBeCloseTo(testCase.realness, 8);
   });
 });
 
@@ -55,14 +69,41 @@ test("inputs the shader cannot handle are refused", () => {
     /camera height/,
   );
   const bad: RealnessSettings[] = [
-    { margin: 0, nearOk: 3, farLimit: 10 },
-    { margin: 0.05, nearOk: -1, farLimit: 10 },
-    { margin: 0.05, nearOk: 10, farLimit: 10 },
-    { margin: 0.05, nearOk: 3, farLimit: Number.NaN },
-    { margin: 0.05, nearOk: 3, farLimit: Number.POSITIVE_INFINITY },
-    { margin: Number.POSITIVE_INFINITY, nearOk: 3, farLimit: 10 },
+    { ...REALNESS_SETTINGS, margin: 0 },
+    { ...REALNESS_SETTINGS, nearOk: -1 },
+    { ...REALNESS_SETTINGS, nearOk: 10, farLimit: 10 },
+    { ...REALNESS_SETTINGS, farLimit: Number.NaN },
+    { ...REALNESS_SETTINGS, farLimit: Number.POSITIVE_INFINITY },
+    { ...REALNESS_SETTINGS, margin: Number.POSITIVE_INFINITY },
   ];
   for (const settings of bad) {
     expect(() => checkRealnessInputs(1, settings)).toThrow(/margin/);
   }
+  for (const lightCore of [-0.1, 1, Number.NaN]) {
+    expect(() => checkRealnessInputs(1, { ...REALNESS_SETTINGS, lightCore })).toThrow(/lightCore/);
+  }
+});
+
+test("lights the shader cannot hold are refused", () => {
+  const light: MemoryLight = { position: [0, 0, 1], radius: 1 };
+  expect(() => checkLights(Array(MAX_LIGHTS).fill(light), REALNESS_SETTINGS)).not.toThrow();
+  expect(() => checkLights(Array(MAX_LIGHTS + 1).fill(light), REALNESS_SETTINGS)).toThrow(
+    /at most/,
+  );
+  const badLights: MemoryLight[] = [
+    { position: [0, 0, 1], radius: 0 },
+    { position: [0, 0, 1], radius: Number.POSITIVE_INFINITY },
+    { position: [0, Number.NaN, 1], radius: 1 },
+  ];
+  for (const bad of badLights) {
+    expect(() => checkLights([bad], REALNESS_SETTINGS)).toThrow(/finite/);
+  }
+});
+
+test("without lights, realness is what the photos saw", () => {
+  const cameras = casePhotoCameras(["ahead"]);
+  const settings = caseSettings(vectors.cases[0] as VectorCase);
+  expect(realness([0, 0, 3], cameras, 1, [], settings)).toBe(
+    cameraRealness([0, 0, 3], cameras, 1, settings),
+  );
 });

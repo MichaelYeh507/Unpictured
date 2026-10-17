@@ -1,10 +1,17 @@
 /**
- * Camera realness on the GPU: the same steps as photoRealness in core/src/realness.ts, as a
- * Spark modifier that colors each splat from pink (imagined) to blue (seen by a photo).
+ * Realness on the GPU: the same steps as core/src/realness.ts, as a Spark modifier that colors
+ * each splat from pink (imagined) to blue (seen by a photo or near a memory light).
  */
 
 import { dyno, type GsplatModifier } from "@sparkjsdev/spark";
-import { checkRealnessInputs, type PhotoCamera, type RealnessSettings } from "@unpictured/core";
+import {
+  checkLights,
+  checkRealnessInputs,
+  MAX_LIGHTS,
+  type MemoryLight,
+  type PhotoCamera,
+  type RealnessSettings,
+} from "@unpictured/core";
 
 /** The walkable floor's colors (walkableFloor.ts), as sRGB like the splats' own colors. */
 const REAL_RGB = [0x4a / 255, 0x9e / 255, 0xff / 255];
@@ -35,27 +42,74 @@ float photoRealness(vec3 point, vec3 position, vec4 turnTilt, vec4 lens, vec2 im
 }
 `;
 
-/** Realness of a raw-frame point (a splat's center in its own frame) for these photos. */
+/** The memory lights as shader uniforms: up to MAX_LIGHTS of (x, y, z, radius) in the raw
+ * frame. Lights change while the world is shown, so unlike the cameras they are not compiled in;
+ * after set(), the SplatMesh needs updateVersion() to redraw. */
+export class RealnessLights {
+  private readonly values = new Float32Array(MAX_LIGHTS * 4);
+  readonly array = new dyno.DynoUniform({
+    key: "lights",
+    type: "vec4",
+    count: MAX_LIGHTS,
+    value: this.values,
+  });
+  readonly count = dyno.dynoInt(0);
+  private current: MemoryLight[] = [];
+
+  get lights(): readonly MemoryLight[] {
+    return this.current;
+  }
+
+  set(lights: readonly MemoryLight[], settings: RealnessSettings): void {
+    checkLights(lights, settings);
+    this.values.fill(0);
+    lights.forEach(({ position, radius }, index) => {
+      this.values.set([...position, radius], index * 4);
+    });
+    this.count.value = lights.length;
+    this.current = [...lights];
+  }
+}
+
+/** Realness of a raw-frame point (a splat's center in its own frame) for these photos and, if
+ * given, these lights. */
 export function realnessOf(
   center: dyno.DynoVal<"vec3">,
   cameras: readonly PhotoCamera[],
   cameraHeight: number,
   settings: RealnessSettings,
+  lights?: RealnessLights,
 ): dyno.DynoVal<"float"> {
   checkRealnessInputs(cameraHeight, settings);
   const node = new dyno.Dyno({
-    inTypes: { center: "vec3" },
+    inTypes: { center: "vec3", lights: "vec4", lightCount: "int" },
     outTypes: { realness: "float" },
-    inputs: { center },
+    inputs: { center, lights: lights?.array, lightCount: lights?.count },
     globals: () => [PHOTO_REALNESS_GLSL],
     statements: ({ inputs, outputs }) => {
       const point = requireName(inputs.center);
       const realness = requireName(outputs.realness);
       const perPhoto = cameras.map((camera) => photoCall(point, camera, cameraHeight, settings));
-      return [
+      const statements = [
         `${realness} = 0.0;`,
         ...perPhoto.map((call) => `${realness} = max(${realness}, ${call});`),
       ];
+      if (lights !== undefined) {
+        const array = requireName(inputs.lights);
+        const count = requireName(inputs.lightCount);
+        const core = glslFloat(settings.lightCore);
+        statements.push(
+          `for (int i = 0; i < ${MAX_LIGHTS}; i++) {`,
+          `  if (i >= ${count}) {`,
+          "    break;",
+          "  }",
+          `  vec4 light = ${array}[i];`,
+          `  float away = length(${point} - light.xyz);`,
+          `  ${realness} = max(${realness}, 1.0 - smoothstep(${core} * light.w, light.w, away));`,
+          "}",
+        );
+      }
+      return statements;
     },
   });
   return node.outputs.realness;
@@ -66,13 +120,14 @@ export function realnessHeatmap(
   cameras: readonly PhotoCamera[],
   cameraHeight: number,
   settings: RealnessSettings,
+  lights?: RealnessLights,
 ): GsplatModifier {
   return dyno.dynoBlock({ gsplat: dyno.Gsplat }, { gsplat: dyno.Gsplat }, ({ gsplat }) => {
     if (gsplat === undefined) {
       throw new Error("realness heatmap: no splat to color");
     }
     const { center, rgb } = dyno.splitGsplat(gsplat).outputs;
-    const realness = realnessOf(center, cameras, cameraHeight, settings);
+    const realness = realnessOf(center, cameras, cameraHeight, settings, lights);
     return { gsplat: dyno.combineGsplat({ gsplat, rgb: heatmapColor(realness, rgb) }) };
   });
 }

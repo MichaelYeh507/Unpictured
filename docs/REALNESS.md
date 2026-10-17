@@ -1,16 +1,17 @@
 # Realness
 
-Realness says how much of a world a source photo actually saw, from 1 (seen) to 0 (imagined
-by the world model). It drives the game's look and rules later; for now the viewer shows it as a
-heatmap (key R): blue is real, pink is imagined.
+Realness says how much of a world is real, from 1 to 0 (imagined by the world model): either a
+source photo saw it, or a memory light (a piece the player restored) shines on it. It drives the
+game's look and rules later; for now the viewer shows it as a heatmap (key R): blue is real, pink
+is imagined.
 
 This file is the contract for every implementation: the TypeScript reference
 (`core/src/realness.ts`), the shader (`web/src/realnessShader.ts`), and a later Unreal Engine
 port. They must all pass `tests/realness_vectors.json`.
 
-Version 1 covers camera realness. Memory light (restored pieces glowing real around them) comes
-next. Occlusion (a point hidden behind something in the photo was not really seen) is planned
-for a later version; until then such points count as seen.
+Version 1 covers camera realness and memory light. Occlusion (a point hidden behind something in
+the photo was not really seen) is planned for a later version; until then such points count as
+seen.
 
 ## Inputs
 
@@ -24,7 +25,10 @@ for a later version; until then such points count as seen.
   collider has a hole there, the nearest floor beside it. Distances are measured in
   camera heights, so drafts (which have no scale) and standard worlds use the same numbers, and
   Marble's metric estimate (which can be off by half again) does not matter.
-- **Settings**: `margin`, `nearOk` and `farLimit`, below.
+- **Memory lights**: up to 8, each a position in the raw frame and a radius in raw units. In the
+  game a piece's own size will set its radius; the viewer's test lights (key L) are sized in
+  camera heights.
+- **Settings**: `margin`, `nearOk`, `farLimit` and `lightCore`, below.
 
 ## Formula
 
@@ -58,6 +62,19 @@ edges and of its height for the top and bottom.
 **Several photos:** a world made from several photos gives each point the highest realness any of
 its photos gives it.
 
+For one light:
+
+```
+away     = |point - light position|                in raw units
+realness = 1 - smoothstep(lightCore * radius, radius, away)
+```
+
+So a point is fully real within `lightCore` of the light's radius and fades to imagined at the
+radius. `lightCore` must be at least 0 and below 1, and each radius a finite number above 0.
+
+**Altogether:** realness is the highest value over the photos and the lights. A world without
+lights is just its camera realness.
+
 ## Settings
 
 | Setting | Meaning | Value |
@@ -65,22 +82,27 @@ its photos gives it.
 | `margin` | Half the width of the fade across the frame's edge, as a share of the photo's width or height | 0.05 |
 | `nearOk` | Fully real up to this distance from the camera, in camera heights | 6 |
 | `farLimit` | Imagined from this distance on, in camera heights | 25 |
+| `lightCore` | Share of a light's radius that is fully real | 0.7 |
 
 Tuned by eye on the five test worlds: `living-room-kitchen` and `sunset-alley` (standard) and
 `village-road-draft`, `riverside-path-draft` and `old-street-draft` (drafts).
 For a phone photo, a camera height is about 1.5 m, so a point stays fully real to about 9 m and
 is imagined from about 37 m. A shorter range (3 and 10) turned most of what an outdoor photo
-clearly shows pink; indoors, a whole room lies within 6 camera heights either way.
+clearly shows pink; indoors, a whole room lies within 6 camera heights either way. `lightCore`
+keeps the brief's 0.7: a solid core with a short, visible fade, so it is clear where a light
+ends (the game's rules about light will depend on that edge).
 
 ## Test vectors
 
 `tests/realness_vectors.json` has `settings`, named `cameras` (camera.json fields), and `cases`.
-Each case lists the cameras it uses, a `camera_height`, a `point`, the expected `realness`, and its
-own `settings` where they differ. The expected values come from a separate calculation with
+Each case lists the cameras it uses (possibly none), a `camera_height`, any `lights` (raw
+`position` and `radius`), a `point`, the expected `realness`, and its own `settings` where they
+differ. The expected values come from a separate calculation with
 explicit rotation matrices; the simple cases (straight ahead, on a frame edge, halfway through a
 fade) can be checked by hand.
 
 - The TypeScript reference must match them to 8 decimal places.
 - The shader works in 32-bit floats and must match them to 5 decimal places. A browser test runs
-  it in headless Chromium, reads the results back from the GPU, and also checks 2,000 sample splats
-  through the viewer's heatmap against the reference, and the heatmap's colors.
+  it in headless Chromium, reads the results back from the GPU, and also checks 2,300 sample
+  splats (some placed around three lights) through the viewer's heatmap against the reference,
+  that lights changed after the shader is built take effect, and the heatmap's colors.
