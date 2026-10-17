@@ -16,7 +16,7 @@ export interface RealnessSettings {
   farLimit: number;
 }
 
-export const REALNESS_SETTINGS: RealnessSettings = { margin: 0.05, nearOk: 3, farLimit: 10 };
+export const REALNESS_SETTINGS: RealnessSettings = { margin: 0.05, nearOk: 6, farLimit: 25 };
 
 /** The highest realness any of the photos gives a point, from 0 (imagined) to 1 (seen). */
 export function cameraRealness(

@@ -315,6 +315,13 @@
       "realness": 0.675197063
     },
     {
+      "label": "two photos: both see it, the first is higher",
+      "cameras": ["ahead", "turned_right"],
+      "camera_height": 1,
+      "point": [0.95, 0, 1],
+      "realness": 0.68359375
+    },
+    {
       "label": "two photos: neither sees it",
       "cameras": ["ahead", "turned_right"],
       "camera_height": 1,

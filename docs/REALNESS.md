@@ -61,11 +61,13 @@ its photos gives it.
 | Setting | Meaning | Value |
 | --- | --- | --- |
 | `margin` | Half the width of the fade across the frame's edge, as a share of the photo's width or height | 0.05 |
-| `nearOk` | Fully real up to this distance from the camera, in camera heights | 3 |
-| `farLimit` | Imagined from this distance on, in camera heights | 10 |
+| `nearOk` | Fully real up to this distance from the camera, in camera heights | 6 |
+| `farLimit` | Imagined from this distance on, in camera heights | 25 |
 
-These are starting values, still to be tuned by eye on the five test worlds (two standard worlds
-and three drafts, indoors and out).
+Tuned by eye on the five test worlds (two standard worlds and three drafts, indoors and out).
+For a phone photo, a camera height is about 1.5 m, so a point stays fully real to about 9 m and
+is imagined from about 37 m. A shorter range (3 and 10) turned most of what an outdoor photo
+clearly shows pink; indoors, a whole room lies within 6 camera heights either way.
 
 ## Test vectors
 

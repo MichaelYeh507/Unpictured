@@ -71,21 +71,27 @@ export function realnessHeatmap(
     if (gsplat === undefined) {
       throw new Error("realness heatmap: no splat to color");
     }
-    const { center } = dyno.splitGsplat(gsplat).outputs;
+    const { center, rgb } = dyno.splitGsplat(gsplat).outputs;
     const realness = realnessOf(center, cameras, cameraHeight, settings);
-    return { gsplat: dyno.combineGsplat({ gsplat, rgb: heatmapColor(realness) }) };
+    return { gsplat: dyno.combineGsplat({ gsplat, rgb: heatmapColor(realness, rgb) }) };
   });
 }
 
-/** Pink for imagined through to blue for real. */
-export function heatmapColor(realness: dyno.DynoVal<"float">): dyno.DynoVal<"vec3"> {
+/** Pink for imagined through to blue for real, shaded by the splat's own brightness so the
+ * scene stays readable (white keeps the pure heat color). */
+export function heatmapColor(
+  realness: dyno.DynoVal<"float">,
+  original: dyno.DynoVal<"vec3">,
+): dyno.DynoVal<"vec3"> {
   const node = new dyno.Dyno({
-    inTypes: { realness: "float" },
+    inTypes: { realness: "float", original: "vec3" },
     outTypes: { rgb: "vec3" },
-    inputs: { realness },
-    statements: ({ inputs, outputs }) => [
-      `${requireName(outputs.rgb)} = mix(${vec(IMAGINED_RGB)}, ${vec(REAL_RGB)}, ${requireName(inputs.realness)});`,
-    ],
+    inputs: { realness, original },
+    statements: ({ inputs, outputs }) => {
+      const heat = `mix(${vec(IMAGINED_RGB)}, ${vec(REAL_RGB)}, ${requireName(inputs.realness)})`;
+      const brightness = `dot(${requireName(inputs.original)}, vec3(0.2126, 0.7152, 0.0722))`;
+      return [`${requireName(outputs.rgb)} = ${heat} * (0.35 + 0.65 * ${brightness});`];
+    },
   });
   return node.outputs.rgb;
 }

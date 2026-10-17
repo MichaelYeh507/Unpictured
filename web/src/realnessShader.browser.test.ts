@@ -97,7 +97,7 @@ test("the heatmap modifier colors sample splats by the reference realness", asyn
       (random() * 2 - 1) * reach,
     );
     const size = new THREE.Vector3(0.01, 0.01, 0.01);
-    splats.pushSplat(center, size, new THREE.Quaternion(), 1, new THREE.Color(0.5, 0.5, 0.5));
+    splats.pushSplat(center, size, new THREE.Quaternion(), 1, new THREE.Color(1, 1, 1));
   }
 
   // Centers as the GPU stores them (packed, so slightly rounded), for the reference.
@@ -110,7 +110,8 @@ test("the heatmap modifier colors sample splats by the reference realness", asyn
     gpuFloats(count, axis("z")),
   ]);
 
-  // Realness back out of the heatmap's color: red runs from 1 (imagined) to 0x4a / 255 (real).
+  // Realness back out of the heatmap's color. The splats are white, so the shading keeps the pure
+  // heat color, whose red runs from 1 (imagined) to 0x4a / 255 (real).
   const heatmap = realnessHeatmap(cameras, cameraHeight, settings);
   const red = await gpuFloats(count, (index) => {
     const colored = heatmap.apply({ gsplat: splatAt(index) }).gsplat;
