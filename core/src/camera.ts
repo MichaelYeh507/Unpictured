@@ -84,7 +84,7 @@ export function isInPhoto(camera: PhotoCamera, rawPoint: Vec3): boolean {
 }
 
 /** The reverse of rotateCameraRay, from the camera's position: turn back by yaw, then by pitch. */
-function toCameraRay(camera: PhotoCamera, rawPoint: Vec3): Vec3 {
+export function toCameraRay(camera: PhotoCamera, rawPoint: Vec3): Vec3 {
   const [px, py, pz] = camera.position;
   const [x, y, z] = [rawPoint[0] - px, rawPoint[1] - py, rawPoint[2] - pz];
   const tilt = (camera.pitchDeg * Math.PI) / 180;

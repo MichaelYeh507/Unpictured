@@ -9,7 +9,7 @@
     "dev": "npm run dev --workspace web",
     "build": "npm run build --workspace web",
     "typecheck": "npm run typecheck --workspaces",
-    "test": "npm run test --workspace core",
+    "test": "npm run test --workspaces",
     "lint": "biome check .",
     "format": "biome check --write .",
     "check:ts": "npm run lint && npm run typecheck && npm run test && npm run build",

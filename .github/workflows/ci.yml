@@ -21,4 +21,6 @@ jobs:
         with:
           version: "0.12.19"
       - run: npm ci
+      # Headless Chromium (and the system libraries it needs) for the shader tests.
+      - run: npx playwright install --with-deps chromium --only-shell
       - run: npm run check
