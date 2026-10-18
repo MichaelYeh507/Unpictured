@@ -122,12 +122,11 @@ export function checkRealnessInputs(cameraHeight: number, settings: RealnessSett
   if (!finite || !(margin > 0) || !(nearOk >= 0) || !(farLimit > nearOk)) {
     throw new Error("realness: needs finite settings with margin > 0 and 0 <= nearOk < farLimit");
   }
-  if (!(lightCore >= 0 && lightCore < 1)) {
-    throw new Error("realness: lightCore must be at least 0 and below 1");
-  }
+  checkLightCore(lightCore);
 }
 
-/** At most MAX_LIGHTS lights, each with a finite position and a finite radius above 0. */
+/** At most MAX_LIGHTS lights, each with a finite position and a finite radius above 0, and a
+ * lightCore the shader can use. */
 export function checkLights(lights: readonly MemoryLight[], settings: RealnessSettings): void {
   if (lights.length > MAX_LIGHTS) {
     throw new Error(`realness: at most ${MAX_LIGHTS} lights, not ${lights.length}`);
@@ -137,7 +136,12 @@ export function checkLights(lights: readonly MemoryLight[], settings: RealnessSe
       throw new Error("realness: each light needs a finite position and a finite radius above 0");
     }
   }
-  if (!(settings.lightCore >= 0 && settings.lightCore < 1)) {
+  checkLightCore(settings.lightCore);
+}
+
+/** Below 1, so the light's fade has a width (GLSL's smoothstep needs edge0 < edge1). */
+function checkLightCore(lightCore: number): void {
+  if (!(lightCore >= 0 && lightCore < 1)) {
     throw new Error("realness: lightCore must be at least 0 and below 1");
   }
 }

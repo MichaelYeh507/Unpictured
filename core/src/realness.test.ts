@@ -98,6 +98,9 @@ test("lights the shader cannot hold are refused", () => {
   for (const bad of badLights) {
     expect(() => checkLights([bad], REALNESS_SETTINGS)).toThrow(/finite/);
   }
+  for (const lightCore of [-0.1, 1, Number.NaN]) {
+    expect(() => checkLights([light], { ...REALNESS_SETTINGS, lightCore })).toThrow(/lightCore/);
+  }
 });
 
 test("without lights, realness is what the photos saw", () => {

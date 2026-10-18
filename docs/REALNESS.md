@@ -105,4 +105,5 @@ fade) can be checked by hand.
 - The shader works in 32-bit floats and must match them to 5 decimal places. A browser test runs
   it in headless Chromium, reads the results back from the GPU, and also checks 2,300 sample
   splats (some placed around three lights) through the viewer's heatmap against the reference,
-  that lights changed after the shader is built take effect, and the heatmap's colors.
+  that lights changed after the shader is built take effect without compiling it again, and the
+  heatmap's colors.

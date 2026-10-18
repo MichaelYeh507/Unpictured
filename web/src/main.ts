@@ -257,8 +257,7 @@ class RealnessToggle {
       return;
     }
     const light: MemoryLight = { position: rawPoint, radius: this.lightSize * this.cameraHeight };
-    const kept = this.lights.lights.slice(-(MAX_LIGHTS - 1));
-    this.lights.set([...kept, light], REALNESS_SETTINGS);
+    this.lights.set([...this.lights.lights, light].slice(-MAX_LIGHTS), REALNESS_SETTINGS);
     this.splats.updateVersion();
     this.show(true);
   }
@@ -319,12 +318,16 @@ class RealnessToggle {
       this.splats.objectModifier = shown ? this.heatmap : undefined;
       this.splats.updateGenerator();
     }
-    this.describe();
+    if (shown) {
+      this.describe();
+    } else {
+      realnessLine.textContent = "";
+    }
   }
 
+  /** The legend, while the heatmap is shown; while it is hidden, the line keeps any message. */
   private describe(): void {
     if (!this.shown) {
-      realnessLine.textContent = "";
       return;
     }
     const { nearOk, farLimit } = REALNESS_SETTINGS;

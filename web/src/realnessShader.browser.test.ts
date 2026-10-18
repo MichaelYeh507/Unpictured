@@ -33,12 +33,10 @@ afterEach(() => {
   expect(shaderErrors, "shader compile errors").toEqual([]);
 });
 
-/** Computes one float per index on the GPU and reads the exact 32-bit values back. */
-async function gpuFloats(
-  count: number,
-  valueAt: (index: dyno.DynoVal<"int">) => dyno.DynoVal<"float">,
-): Promise<number[]> {
-  const reader = dyno.dynoBlock({ index: "int" }, { rgba8: "vec4" }, ({ index }) => {
+/** A shader computing one float per index, packed so it reads back exactly. Spark compiles it on
+ * its first read and reuses it after that. */
+function floatReader(valueAt: (index: dyno.DynoVal<"int">) => dyno.DynoVal<"float">) {
+  return dyno.dynoBlock({ index: "int" }, { rgba8: "vec4" }, ({ index }) => {
     if (index === undefined) {
       throw new Error("readback: no index");
     }
@@ -50,9 +48,24 @@ async function gpuFloats(
     });
     return { rgba8: packed.outputs.rgba8 };
   });
+}
+
+/** Runs a reader on the GPU and reads the exact 32-bit values back. */
+async function readFloats(
+  reader: ReturnType<typeof floatReader>,
+  count: number,
+): Promise<number[]> {
   const buffer = readback.ensureBuffer(count, new Float32Array(0));
   const values = await readback.renderReadback({ reader, count, renderer, readback: buffer });
   return Array.from(values.slice(0, count));
+}
+
+/** Computes one float per index with a new shader and reads the values back. */
+function gpuFloats(
+  count: number,
+  valueAt: (index: dyno.DynoVal<"int">) => dyno.DynoVal<"float">,
+): Promise<number[]> {
+  return readFloats(floatReader(valueAt), count);
 }
 
 function photoCameras(entries: Record<string, unknown>[]): PhotoCamera[] {
@@ -89,16 +102,23 @@ describe.each(vectors.cases as VectorCase[])("shader realness: $label", (testCas
   });
 });
 
-test("lights changed after the shader is built take effect", async () => {
+test("lights changed after the shader is built take effect without rebuilding it", async () => {
   const lights = new RealnessLights();
   const point = dyno.dynoConst("vec3", [0, 0, 5]);
-  const shaderRealness = () =>
-    gpuFloats(1, () => realnessOf(point, [], 1, REALNESS_SETTINGS, lights));
-  expect(await shaderRealness()).toEqual([0]);
+  const reader = floatReader(() => realnessOf(point, [], 1, REALNESS_SETTINGS, lights));
+  expect(await readFloats(reader, 1)).toEqual([0]);
+  const programs = renderer.info.programs?.length;
   lights.set([{ position: [0, 0, 5.5], radius: 1 }], REALNESS_SETTINGS);
-  expect(await shaderRealness()).toEqual([1]);
+  expect(await readFloats(reader, 1)).toEqual([1]);
+  // The removed light is still in its slot; the count must keep the shader from reading it.
   lights.set([], REALNESS_SETTINGS);
-  expect(await shaderRealness()).toEqual([0]);
+  expect(await readFloats(reader, 1)).toEqual([0]);
+  expect(renderer.info.programs?.length, "shader programs").toBe(programs);
+});
+
+test("the heatmap refuses bad inputs when it is made, not later inside Spark's render", () => {
+  const lights = new RealnessLights();
+  expect(() => realnessHeatmap([], 0, REALNESS_SETTINGS, lights)).toThrow(/camera height/);
 });
 
 test("the heatmap modifier colors sample splats by the reference realness", async () => {

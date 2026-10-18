@@ -60,9 +60,9 @@ export class RealnessLights {
     return this.current;
   }
 
+  /** Slots past the count keep old lights: the shader stops at the count, which a test checks. */
   set(lights: readonly MemoryLight[], settings: RealnessSettings): void {
     checkLights(lights, settings);
-    this.values.fill(0);
     lights.forEach(({ position, radius }, index) => {
       this.values.set([...position, radius], index * 4);
     });
@@ -71,57 +71,54 @@ export class RealnessLights {
   }
 }
 
-/** Realness of a raw-frame point (a splat's center in its own frame) for these photos and, if
- * given, these lights. */
+/** Realness of a raw-frame point (a splat's center in its own frame) for these photos and
+ * lights. */
 export function realnessOf(
   center: dyno.DynoVal<"vec3">,
   cameras: readonly PhotoCamera[],
   cameraHeight: number,
   settings: RealnessSettings,
-  lights?: RealnessLights,
+  lights: RealnessLights,
 ): dyno.DynoVal<"float"> {
   checkRealnessInputs(cameraHeight, settings);
   const node = new dyno.Dyno({
     inTypes: { center: "vec3", lights: "vec4", lightCount: "int" },
     outTypes: { realness: "float" },
-    inputs: { center, lights: lights?.array, lightCount: lights?.count },
+    inputs: { center, lights: lights.array, lightCount: lights.count },
     globals: () => [PHOTO_REALNESS_GLSL],
     statements: ({ inputs, outputs }) => {
       const point = requireName(inputs.center);
       const realness = requireName(outputs.realness);
+      const array = requireName(inputs.lights);
+      const count = requireName(inputs.lightCount);
       const perPhoto = cameras.map((camera) => photoCall(point, camera, cameraHeight, settings));
-      const statements = [
+      const core = glslFloat(settings.lightCore);
+      return [
         `${realness} = 0.0;`,
         ...perPhoto.map((call) => `${realness} = max(${realness}, ${call});`),
+        `for (int i = 0; i < ${MAX_LIGHTS}; i++) {`,
+        `  if (i >= ${count}) {`,
+        "    break;",
+        "  }",
+        `  vec4 light = ${array}[i];`,
+        `  float away = length(${point} - light.xyz);`,
+        `  ${realness} = max(${realness}, 1.0 - smoothstep(${core} * light.w, light.w, away));`,
+        "}",
       ];
-      if (lights !== undefined) {
-        const array = requireName(inputs.lights);
-        const count = requireName(inputs.lightCount);
-        const core = glslFloat(settings.lightCore);
-        statements.push(
-          `for (int i = 0; i < ${MAX_LIGHTS}; i++) {`,
-          `  if (i >= ${count}) {`,
-          "    break;",
-          "  }",
-          `  vec4 light = ${array}[i];`,
-          `  float away = length(${point} - light.xyz);`,
-          `  ${realness} = max(${realness}, 1.0 - smoothstep(${core} * light.w, light.w, away));`,
-          "}",
-        );
-      }
-      return statements;
     },
   });
   return node.outputs.realness;
 }
 
-/** A modifier for a SplatMesh in the raw frame (objectModifier) that shows realness as color. */
+/** A modifier for a SplatMesh in the raw frame (objectModifier) that shows realness as color.
+ * The inputs are checked here, because Spark builds the shader later, inside its render. */
 export function realnessHeatmap(
   cameras: readonly PhotoCamera[],
   cameraHeight: number,
   settings: RealnessSettings,
-  lights?: RealnessLights,
+  lights: RealnessLights,
 ): GsplatModifier {
+  checkRealnessInputs(cameraHeight, settings);
   return dyno.dynoBlock({ gsplat: dyno.Gsplat }, { gsplat: dyno.Gsplat }, ({ gsplat }) => {
     if (gsplat === undefined) {
       throw new Error("realness heatmap: no splat to color");
