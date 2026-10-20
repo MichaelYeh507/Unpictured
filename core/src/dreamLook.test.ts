@@ -3,26 +3,37 @@ import {
   checkDreamSettings,
   DREAM_SETTINGS,
   type DreamSettings,
+  dreamColor,
   dreamIntensity,
   LUMA,
+  toonColor,
   washColor,
 } from "./dreamLook.ts";
 import type { Vec3 } from "./frames.ts";
 
 const PAPER: Vec3 = [0.96, 0.94, 0.89];
 const PIGMENT: Vec3 = [0.3, 0.36, 0.56];
-/** Only the step a test is about; the others do nothing. */
+/** For the wash tests: only the step a test is about does anything. */
 const NONE: DreamSettings = {
+  ...DREAM_SETTINGS,
   saturation: 1,
   tint: 0,
   paperLift: 0,
   paper: PAPER,
   pigment: PIGMENT,
 };
+/** The toon settings the worked toon cases use, whatever the defaults become. */
+const TOON: DreamSettings = {
+  ...DREAM_SETTINGS,
+  bands: 4,
+  bandSoftness: 0.04,
+  shadowFloor: 0.2,
+  vivid: 1.5,
+};
 
 function expectColor(actual: Vec3, expected: Vec3): void {
   actual.forEach((value, i) => {
-    expect(value, `channel ${i}`).toBeCloseTo(expected[i] ?? Number.NaN, 10);
+    expect(value, `channel ${i}`).toBeCloseTo(expected[i] ?? Number.NaN, 9);
   });
 }
 
@@ -34,7 +45,34 @@ test("dream intensity is (1 - realness) times the strength, from 0 to 1", () => 
   expect(dreamIntensity(0.3, 0)).toBe(0);
 });
 
-test("at intensity 0 a color is left exactly as it was", () => {
+test("the toon step snaps brightness to bands (worked separately)", () => {
+  // 4 bands with the darkest at 0.2: levels 0.2, 0.4, 0.6, 0.8 and 1.
+  expectColor(toonColor([0.5, 0.5, 0.5], TOON), [0.6, 0.6, 0.6]);
+  expectColor(toonColor([0.25, 0.25, 0.25], TOON), [0.4, 0.4, 0.4]);
+  expectColor(toonColor([0.3, 0.3, 0.3], TOON), [0.4, 0.4, 0.4]);
+  // Just under and at a band's start give the same color: no jump there.
+  expectColor(toonColor([0.2499999, 0.2499999, 0.2499999], TOON), [0.4, 0.4, 0.4]);
+  // Exactly halfway between two bands (2.5 steps) sits halfway between their levels, and just
+  // past it (2.52 steps) is still on the soft edge: smoothstep gives 0.84375 of the way up.
+  expectColor(toonColor([0.625, 0.625, 0.625], TOON), [0.7, 0.7, 0.7]);
+  expectColor(toonColor([0.63, 0.63, 0.63], TOON), [0.76875, 0.76875, 0.76875]);
+});
+
+test("the toon step keeps the hue and makes the color livelier (worked separately)", () => {
+  expectColor(toonColor([0.5, 0.25, 0.25], TOON), [0.7896091044, 0.2948045522, 0.2948045522]);
+  // Out-of-range channels are clipped: pure red, white and black stay as they are.
+  expectColor(toonColor([1, 0, 0], TOON), [1, 0, 0]);
+  expectColor(toonColor([1, 1, 1], TOON), [1, 1, 1]);
+  expectColor(toonColor([0, 0, 0], TOON), [0, 0, 0]);
+});
+
+test("the dream color is the wash of the toon color", () => {
+  const rgb: Vec3 = [0.7, 0.4, 0.2];
+  expect(dreamColor(rgb, 0.6)).toEqual(washColor(toonColor(rgb), 0.6));
+  expect(dreamColor(rgb, 0)).toEqual(toonColor(rgb));
+});
+
+test("at intensity 0 the wash leaves a color exactly as it was", () => {
   const colors: Vec3[] = [
     [0.8, 0.2, 0.1],
     [0, 0, 0],
@@ -60,8 +98,8 @@ test("at full intensity, a color moves paperLift of the way to the paper (worked
   expectColor(washColor([0, 0, 0], 1, noSaturationLoss), [0.48, 0.47, 0.445]);
 });
 
-test("at full intensity, a color moves tint of the way to the wash (worked by hand)", () => {
-  // The wash runs from the pigment (black) to the paper (white) by brightness.
+test("at full intensity, a color moves tint of the way to the palette (worked by hand)", () => {
+  // The palette runs from the pigment (black) to the paper (white) by brightness.
   const fullTint: DreamSettings = { ...NONE, tint: 1 };
   expectColor(washColor([0, 0, 0], 1, fullTint), PIGMENT);
   expectColor(washColor([1, 1, 1], 1, fullTint), PAPER);
@@ -84,23 +122,29 @@ test("halfway, both effects are halfway (worked by hand)", () => {
 });
 
 test("taking out saturation keeps a color's brightness", () => {
-  const noPaper: DreamSettings = { ...DREAM_SETTINGS, tint: 0, paperLift: 0 };
+  const noPalette: DreamSettings = { ...DREAM_SETTINGS, tint: 0, paperLift: 0 };
   const brightness = (rgb: Vec3) => rgb[0] * LUMA[0] + rgb[1] * LUMA[1] + rgb[2] * LUMA[2];
   const rgb: Vec3 = [0.9, 0.3, 0.6];
-  expect(brightness(washColor(rgb, 0.8, noPaper))).toBeCloseTo(brightness(rgb), 12);
+  expect(brightness(washColor(rgb, 0.8, noPalette))).toBeCloseTo(brightness(rgb), 12);
 });
 
-test("settings outside 0 to 1 are refused", () => {
+test("settings the shader cannot use are refused", () => {
   expect(() => checkDreamSettings(DREAM_SETTINGS)).not.toThrow();
-  const bad: DreamSettings[] = [
-    { ...DREAM_SETTINGS, saturation: -0.1 },
-    { ...DREAM_SETTINGS, saturation: Number.NaN },
-    { ...DREAM_SETTINGS, paperLift: 1.5 },
-    { ...DREAM_SETTINGS, paper: [0.9, 1.2, 0.9] },
-    { ...DREAM_SETTINGS, tint: 1.5 },
-    { ...DREAM_SETTINGS, pigment: [-0.1, 0.3, 0.5] },
+  const bad: [Partial<DreamSettings>, RegExp][] = [
+    [{ bands: 0.5 }, /bands/],
+    [{ bands: Number.POSITIVE_INFINITY }, /bands/],
+    [{ bandSoftness: 0 }, /bandSoftness/],
+    [{ bandSoftness: 0.6 }, /bandSoftness/],
+    [{ vivid: -1 }, /vivid/],
+    [{ vivid: Number.NaN }, /vivid/],
+    [{ shadowFloor: 1.2 }, /0 to 1/],
+    [{ saturation: -0.1 }, /0 to 1/],
+    [{ tint: 1.5 }, /0 to 1/],
+    [{ paperLift: Number.NaN }, /0 to 1/],
+    [{ paper: [0.9, 1.2, 0.9] }, /0 to 1/],
+    [{ pigment: [-0.1, 0.3, 0.5] }, /0 to 1/],
   ];
-  for (const settings of bad) {
-    expect(() => checkDreamSettings(settings)).toThrow(/0 to 1/);
+  for (const [change, message] of bad) {
+    expect(() => checkDreamSettings({ ...DREAM_SETTINGS, ...change })).toThrow(message);
   }
 });

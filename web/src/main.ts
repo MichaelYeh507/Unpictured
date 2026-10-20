@@ -289,7 +289,8 @@ class RealnessViews {
     }
   }
 
-  /** Strong, then subtle, then off (true colors), and round again; back to the dream look. */
+  /** Strong, then subtle, then off (the splats as Marble made them), and round again; back to
+   * the dream look. */
   async nextDreamStrength(): Promise<void> {
     if (await this.prepare()) {
       const order: DreamStrength[] = ["strong", "subtle", "off"];
@@ -398,9 +399,9 @@ class RealnessViews {
     }
     const look =
       this.dreamStrength === "off"
-        ? "Dream look off: true colors."
-        : `Dream look, ${this.dreamStrength}: what the photos saw keeps its colors, and the ` +
-          "rest washes toward paper the less real it is.";
+        ? "Dream look off: the splats as Marble made them."
+        : `Dream look, ${this.dreamStrength}: soft bands of color everywhere, and the less real ` +
+          "a part is, the more it fades into the dream's pastel.";
     realnessLine.textContent = `${look} V: strong, subtle or off. ${lights}`;
   }
 }

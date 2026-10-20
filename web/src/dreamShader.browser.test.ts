@@ -1,12 +1,13 @@
 import { dyno, PackedSplats } from "@sparkjsdev/spark";
 import {
   DREAM_SETTINGS,
+  dreamColor,
   dreamIntensity,
   type MemoryLight,
   parseCameraFile,
   REALNESS_SETTINGS,
   realness,
-  washColor,
+  toonColor,
 } from "@unpictured/core";
 import * as THREE from "three";
 import { afterAll, afterEach, expect, test } from "vitest";
@@ -100,7 +101,7 @@ test("the dream look washes sample splats as the reference does, at every streng
     for (const [i, center] of centers.entries()) {
       const seen = realness(center, cameras, cameraHeight, lightList, REALNESS_SETTINGS);
       const intensity = dreamIntensity(seen, level);
-      const expected = washColor(colors[i] ?? [0, 0, 0], intensity, DREAM_SETTINGS);
+      const expected = dreamColor(colors[i] ?? [0, 0, 0], intensity, DREAM_SETTINGS);
       expected.forEach((value, channel) => {
         expect(shown[i]?.[channel], `strength ${level}, splat ${i}`).toBeCloseTo(value, 5);
       });
@@ -112,12 +113,12 @@ test("the dream look washes sample splats as the reference does, at every streng
     expect(partly, `strength ${level}`).toBeGreaterThan(50);
   }
 
-  // Strength 0 is no dream at all (the viewer's "off" removes the modifier instead).
+  // Strength 0 leaves only the toon step (the viewer's "off" removes the modifier instead).
   strength.value = 0;
-  const unwashed = await readColors();
+  const toonOnly = await readColors();
   for (const [i, color] of colors.entries()) {
-    color.forEach((value, channel) => {
-      expect(unwashed[i]?.[channel], `strength 0, splat ${i}`).toBeCloseTo(value, 6);
+    toonColor(color, DREAM_SETTINGS).forEach((value, channel) => {
+      expect(toonOnly[i]?.[channel], `strength 0, splat ${i}`).toBeCloseTo(value, 5);
     });
   }
 });
