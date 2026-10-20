@@ -62,7 +62,9 @@ says how far away that is.
 
 With `camera.json` and a collider, the world shows in the dream look (`docs/DREAM_LOOK.md`): soft
 bands of color everywhere, and the less real a part is (`docs/REALNESS.md`), the more it fades into
-the dream's pastel. V switches it between strong, subtle and off (the splats as Marble made them).
+the dream's pastel and swells. Far from the photo spot, unreal parts also drift slowly and dissolve
+toward the paper behind them; floors hold still. V switches it between strong, subtle and off (the
+splats as Marble made them).
 R shows realness as a heatmap instead, blue real and pink imagined. L drops a test memory light on
 whatever is in the middle of the screen, [ and ] shrink or grow it, and Shift+L clears them. H
 hides everything but the world, for clean screenshots.

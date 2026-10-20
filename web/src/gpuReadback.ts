@@ -9,6 +9,13 @@ import * as THREE from "three";
 
 type FloatAt = (index: dyno.DynoVal<"int">) => dyno.DynoVal<"float">;
 
+export interface StoredSplats {
+  centers: Vec3[];
+  colors: Vec3[];
+  scales: Vec3[];
+  opacities: number[];
+}
+
 /** A shader computing one float per index, packed so it reads back exactly. Spark compiles it on
  * its first read and reuses it after that. */
 export function floatReader(valueAt: FloatAt) {
@@ -58,22 +65,25 @@ export class GpuReadback {
     return this.readFloats(floatReader(valueAt), count);
   }
 
-  /** Each splat's center and color as the GPU stores them: packing rounds them a little, so
-   * reference values must start from these. */
-  async splatsAsStored(splats: PackedSplats): Promise<{ centers: Vec3[]; colors: Vec3[] }> {
+  /** Each splat as the GPU stores it: packing rounds centers, colors, sizes and opacities a
+   * little, so reference values must start from these. */
+  async splatsAsStored(splats: PackedSplats): Promise<StoredSplats> {
     const count = splats.numSplats;
-    const part = (field: "center" | "rgb", pick: "x" | "y" | "z" | "r" | "g" | "b") =>
-      this.floats(count, (index) => {
-        const value = dyno.splitGsplat(dyno.readPackedSplat(splats.dyno, index)).outputs[field];
-        return dyno.split(value).outputs[pick];
-      });
-    const [x, y, z, r, g, b] = await Promise.all([
+    const stored = (index: dyno.DynoVal<"int">) =>
+      dyno.splitGsplat(dyno.readPackedSplat(splats.dyno, index)).outputs;
+    const part = (field: "center" | "rgb" | "scales", pick: "x" | "y" | "z" | "r" | "g" | "b") =>
+      this.floats(count, (index) => dyno.split(stored(index)[field]).outputs[pick]);
+    const [x, y, z, r, g, b, sx, sy, sz, opacities] = await Promise.all([
       part("center", "x"),
       part("center", "y"),
       part("center", "z"),
       part("rgb", "r"),
       part("rgb", "g"),
       part("rgb", "b"),
+      part("scales", "x"),
+      part("scales", "y"),
+      part("scales", "z"),
+      this.floats(count, (index) => stored(index).opacity),
     ]);
     const triple = (a: number[], b: number[], c: number[], i: number): Vec3 => [
       a[i] ?? 0,
@@ -83,6 +93,8 @@ export class GpuReadback {
     return {
       centers: x.map((_, i) => triple(x, y, z, i)),
       colors: r.map((_, i) => triple(r, g, b, i)),
+      scales: sx.map((_, i) => triple(sx, sy, sz, i)),
+      opacities,
     };
   }
 }
