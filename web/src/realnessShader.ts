@@ -150,7 +150,7 @@ export function heatmapColor(
 
 /** Spark names only the inputs and outputs something uses; a missing one would write the word
  * "undefined" into the shader, which then fails to compile and reads back as zeros. */
-function requireName(name: string | undefined): string {
+export function requireName(name: string | undefined): string {
   if (name === undefined) {
     throw new Error("realness shader: an input or output was not connected");
   }
@@ -179,7 +179,8 @@ function photoCall(
   return `photoRealness(${parts.join(", ")})`;
 }
 
-function vec(values: readonly number[]): string {
+/** A GLSL vector literal, such as vec3(1.0, 0.5, 0.0). */
+export function vec(values: readonly number[]): string {
   return `vec${values.length}(${values.map(glslFloat).join(", ")})`;
 }
 

@@ -1,4 +1,4 @@
-import { dyno, PackedSplats, Readback } from "@sparkjsdev/spark";
+import { dyno, PackedSplats } from "@sparkjsdev/spark";
 import {
   type MemoryLight,
   type PhotoCamera,
@@ -6,11 +6,11 @@ import {
   REALNESS_SETTINGS,
   type RealnessSettings,
   realness,
-  type Vec3,
 } from "@unpictured/core";
 import * as THREE from "three";
 import { afterAll, afterEach, describe, expect, test } from "vitest";
 import vectors from "../../tests/realness_vectors.json" with { type: "json" };
+import { floatReader, GpuReadback, seededRandom } from "./gpuReadback.ts";
 import { heatmapColor, RealnessLights, realnessHeatmap, realnessOf } from "./realnessShader.ts";
 
 type VectorSettings = { margin: number; near_ok: number; far_limit: number; light_core: number };
@@ -19,54 +19,11 @@ type VectorCase = (typeof vectors.cases)[number] & {
   lights?: { position: number[]; radius: number }[];
 };
 
-const renderer = new THREE.WebGLRenderer({ antialias: false });
-const readback = new Readback({ renderer });
-afterAll(() => renderer.dispose());
-
-// A shader that fails to compile reads back as zeros, which could pass for "imagined".
-const shaderErrors: string[] = [];
-renderer.debug.onShaderError = (gl, _program, vertexShader, fragmentShader) => {
-  const logs = [vertexShader, fragmentShader].map((shader) => gl.getShaderInfoLog(shader));
-  shaderErrors.push(logs.join("\n"));
-};
+const gpu = new GpuReadback();
+afterAll(() => gpu.renderer.dispose());
 afterEach(() => {
-  expect(shaderErrors, "shader compile errors").toEqual([]);
+  expect(gpu.shaderErrors, "shader compile errors").toEqual([]);
 });
-
-/** A shader computing one float per index, packed so it reads back exactly. Spark compiles it on
- * its first read and reuses it after that. */
-function floatReader(valueAt: (index: dyno.DynoVal<"int">) => dyno.DynoVal<"float">) {
-  return dyno.dynoBlock({ index: "int" }, { rgba8: "vec4" }, ({ index }) => {
-    if (index === undefined) {
-      throw new Error("readback: no index");
-    }
-    const packed = new dyno.Dyno({
-      inTypes: { value: "float" },
-      outTypes: { rgba8: "vec4" },
-      inputs: { value: valueAt(index) },
-      statements: ({ inputs, outputs }) => [`${outputs.rgba8} = floatToVec4(${inputs.value});`],
-    });
-    return { rgba8: packed.outputs.rgba8 };
-  });
-}
-
-/** Runs a reader on the GPU and reads the exact 32-bit values back. */
-async function readFloats(
-  reader: ReturnType<typeof floatReader>,
-  count: number,
-): Promise<number[]> {
-  const buffer = readback.ensureBuffer(count, new Float32Array(0));
-  const values = await readback.renderReadback({ reader, count, renderer, readback: buffer });
-  return Array.from(values.slice(0, count));
-}
-
-/** Computes one float per index with a new shader and reads the values back. */
-function gpuFloats(
-  count: number,
-  valueAt: (index: dyno.DynoVal<"int">) => dyno.DynoVal<"float">,
-): Promise<number[]> {
-  return readFloats(floatReader(valueAt), count);
-}
 
 function photoCameras(entries: Record<string, unknown>[]): PhotoCamera[] {
   const cameras = entries.map((entry) => ({ photo: "source.jpg", match_score: 1, ...entry }));
@@ -94,7 +51,7 @@ describe.each(vectors.cases as VectorCase[])("shader realness: $label", (testCas
     lights.set(vectorLights(testCase), settings);
     const [x = 0, y = 0, z = 0] = testCase.point;
     const point = dyno.dynoConst("vec3", [x, y, z]);
-    const [shown] = await gpuFloats(1, () =>
+    const [shown] = await gpu.floats(1, () =>
       realnessOf(point, cameras, testCase.camera_height, settings, lights),
     );
     // The GPU works in 32-bit floats.
@@ -106,14 +63,14 @@ test("lights changed after the shader is built take effect without rebuilding it
   const lights = new RealnessLights();
   const point = dyno.dynoConst("vec3", [0, 0, 5]);
   const reader = floatReader(() => realnessOf(point, [], 1, REALNESS_SETTINGS, lights));
-  expect(await readFloats(reader, 1)).toEqual([0]);
-  const programs = renderer.info.programs?.length;
+  expect(await gpu.readFloats(reader, 1)).toEqual([0]);
+  const programs = gpu.renderer.info.programs?.length;
   lights.set([{ position: [0, 0, 5.5], radius: 1 }], REALNESS_SETTINGS);
-  expect(await readFloats(reader, 1)).toEqual([1]);
+  expect(await gpu.readFloats(reader, 1)).toEqual([1]);
   // The removed light is still in its slot; the count must keep the shader from reading it.
   lights.set([], REALNESS_SETTINGS);
-  expect(await readFloats(reader, 1)).toEqual([0]);
-  expect(renderer.info.programs?.length, "shader programs").toBe(programs);
+  expect(await gpu.readFloats(reader, 1)).toEqual([0]);
+  expect(gpu.renderer.info.programs?.length, "shader programs").toBe(programs);
 });
 
 test("the heatmap refuses bad inputs when it is made, not later inside Spark's render", () => {
@@ -139,11 +96,7 @@ test("the heatmap modifier colors sample splats by the reference realness", asyn
   lights.set(lightList, settings);
 
   const splats = new PackedSplats();
-  let seed = 12345;
-  const random = () => {
-    seed = (seed * 1103515245 + 12345) % 2 ** 31; // a fixed sequence, the same on every run
-    return seed / 2 ** 31;
-  };
+  const random = seededRandom(12345);
   const addSplat = (x: number, y: number, z: number) => {
     const size = new THREE.Vector3(0.01, 0.01, 0.01);
     const white = new THREE.Color(1, 1, 1);
@@ -171,28 +124,20 @@ test("the heatmap modifier colors sample splats by the reference realness", asyn
   }
   const count = splats.numSplats;
 
-  // Centers as the GPU stores them (packed, so slightly rounded), for the reference.
+  const { centers } = await gpu.splatsAsStored(splats);
   const splatAt = (index: dyno.DynoVal<"int">) => dyno.readPackedSplat(splats.dyno, index);
-  const axis = (pick: "x" | "y" | "z") => (index: dyno.DynoVal<"int">) =>
-    dyno.split(dyno.splitGsplat(splatAt(index)).outputs.center).outputs[pick];
-  const [xs, ys, zs] = await Promise.all([
-    gpuFloats(count, axis("x")),
-    gpuFloats(count, axis("y")),
-    gpuFloats(count, axis("z")),
-  ]);
 
   // Realness back out of the heatmap's color. The splats are white, so the shading keeps the pure
   // heat color, whose red runs from 1 (imagined) to 0x4a / 255 (real).
   const heatmap = realnessHeatmap(cameras, cameraHeight, settings, lights);
-  const red = await gpuFloats(count, (index) => {
+  const red = await gpu.floats(count, (index) => {
     const colored = heatmap.apply({ gsplat: splatAt(index) }).gsplat;
     return dyno.split(dyno.splitGsplat(colored).outputs.rgb).outputs.r;
   });
 
   let partly = 0;
   let partlyLit = 0;
-  for (let i = 0; i < count; i++) {
-    const center: Vec3 = [xs[i] ?? 0, ys[i] ?? 0, zs[i] ?? 0];
+  for (const [i, center] of centers.entries()) {
     const expected = realness(center, cameras, cameraHeight, lightList, settings);
     const shown = (1 - (red[i] ?? 0)) / (1 - 0x4a / 255);
     expect(shown, `splat ${i} at ${center.join(", ")}`).toBeCloseTo(expected, 4);
@@ -222,7 +167,7 @@ test("the heatmap shades its color by the splat's own brightness", async () => {
     for (const original of originals) {
       const rgb = heatmapColor(dyno.dynoConst("float", realness), dyno.dynoConst("vec3", original));
       const { r, g, b } = dyno.split(rgb).outputs;
-      const shown = await Promise.all([r, g, b].map((channel) => gpuFloats(1, () => channel)));
+      const shown = await Promise.all([r, g, b].map((channel) => gpu.floats(1, () => channel)));
       const [red = 0, green = 0, blue = 0] = original;
       const brightness = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
       [0, 1, 2].forEach((channel) => {
