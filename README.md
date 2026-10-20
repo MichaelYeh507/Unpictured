@@ -65,9 +65,9 @@ bands of color everywhere, and the less real a part is (`docs/REALNESS.md`), the
 the dream's pastel and swells; the pastel turns from warm to cold and back once a minute. Far from
 the photo spot, unreal parts also drift slowly and dissolve toward the paper behind them; the
 floor at the photo spot's level holds still. V switches it between strong, subtle and off (the
-splats as Marble made them). R shows realness as a heatmap instead, blue real and pink imagined. L drops a test memory light on
-whatever is in the middle of the screen, [ and ] shrink or grow it, and Shift+L clears them. H
-hides everything but the world, for clean screenshots.
+splats as Marble made them). R shows realness as a heatmap instead, blue real and pink imagined.
+L drops a test memory light on whatever is in the middle of the screen, [ and ] shrink or grow
+it, and Shift+L clears them. H hides everything but the world, for clean screenshots.
 
 Phones need a lighter splat file: add `&splats=500k` or `&splats=100k` to the address
 (`&splats=full_res` asks for the most detailed). If the world lacks that size, the viewer takes the

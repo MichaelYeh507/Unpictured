@@ -270,6 +270,8 @@ class RealnessViews {
   private readonly strength = dyno.dynoFloat(DREAM_STRENGTHS.strong);
   private readonly seconds = dyno.dynoFloat(0);
   private readonly coldness = dyno.dynoFloat(0);
+  /** When the dream look first showed, so each visit's palette cycle starts warm. */
+  private cycleStart: number | undefined;
   private dream: GsplatModifier | undefined;
   private heatmap: GsplatModifier | undefined;
   /** What the splats were last given: Spark's objectModifier cannot be read back. */
@@ -338,7 +340,8 @@ class RealnessViews {
     if (this.applied !== undefined && this.applied === this.dream) {
       // The drift repeats after this loop, so the uniform stays small and precise.
       this.seconds.value = seconds % (DRIFT_LOOP_PERIODS * DREAM_SHAPE_SETTINGS.period);
-      this.coldness.value = coldnessAt(seconds, DREAM_SETTINGS);
+      this.cycleStart ??= seconds;
+      this.coldness.value = coldnessAt(seconds - this.cycleStart, DREAM_SETTINGS);
       const { paper } = paletteAt(this.coldness.value, DREAM_SETTINGS);
       paperBackground.setRGB(...paper, THREE.SRGBColorSpace);
       this.splats.updateVersion();

@@ -1,8 +1,7 @@
 /**
- * The dream look (docs/DREAM_LOOK.md). Every splat is drawn in soft bands of brightness with
- * livelier color (the toon step); then, the less real it is, the more it takes on the dream's
- * palette and fades toward the paper (the wash). The palette turns from warm to cold and back over
- * time. Colors are sRGB from 0 to 1, as splats store them.
+ * The dream look (docs/DREAM_LOOK.md): soft bands of brightness with livelier color (the toon
+ * step), then the less real a splat is, the more it takes on the dream's palette, which cycles
+ * from warm to cold, and fades toward the paper (the wash). Colors are sRGB from 0 to 1.
  */
 
 import type { Vec3 } from "./frames.ts";

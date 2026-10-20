@@ -184,7 +184,8 @@ overlay) for clean screenshots and clips.
 
 While the dream look is shown, the background is the dream's paper color, turning with the
 cycle, so dissolving splats fade into paper; off and the heatmap keep the dark gray background.
-The viewer works out the coldness from its clock each frame and passes it to the shader. The drift moves on every
+Each frame the viewer works out the coldness from its clock, counted from when the dream look
+first showed (so a visit starts warm), and passes it to the shader. The drift moves on every
 frame, so every splat is recomputed every frame: on a laptop's integrated GPU (AMD Radeon 780M,
 1.92 million splats at 1536 x 1152) the median frame went from 20.5 ms still to 25.8 ms drifting,
 and recomputing without moving took 25.7 ms, so nearly all of the cost is the recomputing. The
@@ -202,9 +203,9 @@ heatmap and the dream off do not move.
   (100 of them around a light) at strength and coldness 1 and 0, 0.5 and 0.3, 2 (clamped to 1)
   and 1, and 1 and 0.75. Each color must match the reference to 5 decimal places, and over 50
   splats each time must be partly washed, so the soft middle of the fade is covered. Strength
-  and coldness change between reads of one compiled shader, and no new shader program appears. At strength 0 only the toon step remains. Over 20
-  of the random colors must sit on a soft edge between two toon bands, where the step is
-  steepest.
+  and coldness change between reads of one compiled shader, and no new shader program appears.
+  At strength 0 only the toon step remains. Over 20 of the random colors must sit on a soft edge
+  between two toon bands, where the step is steepest.
 - The shape's reference has worked cases from an independent Python calculation (a splat in the
   middle distance, one far away and fully dissolved, one far away on the floor), plus checks
   that floors hold, the drift stays within its reach and uses it, nothing changes at intensity 0,
