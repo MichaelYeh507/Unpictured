@@ -6,6 +6,7 @@ import {
   SplatMesh,
 } from "@sparkjsdev/spark";
 import {
+  coldnessAt,
   DREAM_SETTINGS,
   DREAM_SHAPE_SETTINGS,
   DREAM_STRENGTHS,
@@ -16,6 +17,7 @@ import {
   MAX_LIGHTS,
   type MemoryLight,
   type PhotoCamera,
+  paletteAt,
   parseCameraFile,
   parseGlbMesh,
   parseWorldMeta,
@@ -52,7 +54,10 @@ document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 // Dark gray, or in the dream look the dream's paper, which shows through where splats dissolve.
 const plainBackground = new THREE.Color(0x202020);
-const paperBackground = new THREE.Color().setRGB(...DREAM_SETTINGS.paper, THREE.SRGBColorSpace);
+const paperBackground = new THREE.Color().setRGB(
+  ...paletteAt(0, DREAM_SETTINGS).paper,
+  THREE.SRGBColorSpace,
+);
 scene.background = plainBackground;
 scene.add(new SparkRenderer({ renderer }));
 
@@ -264,6 +269,7 @@ class RealnessViews {
   private readonly lights = new RealnessLights();
   private readonly strength = dyno.dynoFloat(DREAM_STRENGTHS.strong);
   private readonly seconds = dyno.dynoFloat(0);
+  private readonly coldness = dyno.dynoFloat(0);
   private dream: GsplatModifier | undefined;
   private heatmap: GsplatModifier | undefined;
   /** What the splats were last given: Spark's objectModifier cannot be read back. */
@@ -327,11 +333,14 @@ class RealnessViews {
     this.show(); // also applies the view when a failed start left none
   }
 
-  /** Moves the dream's drift on to this time, while the dream look is shown. */
+  /** Moves the dream's drift and palette on to this time, while the dream look is shown. */
   tick(seconds: number): void {
     if (this.applied !== undefined && this.applied === this.dream) {
       // The drift repeats after this loop, so the uniform stays small and precise.
       this.seconds.value = seconds % (DRIFT_LOOP_PERIODS * DREAM_SHAPE_SETTINGS.period);
+      this.coldness.value = coldnessAt(seconds, DREAM_SETTINGS);
+      const { paper } = paletteAt(this.coldness.value, DREAM_SETTINGS);
+      paperBackground.setRGB(...paper, THREE.SRGBColorSpace);
       this.splats.updateVersion();
     }
   }
@@ -386,6 +395,7 @@ class RealnessViews {
           lights: this.lights,
           strength: this.strength,
           seconds: this.seconds,
+          coldness: this.coldness,
         },
         DREAM_SETTINGS,
         DREAM_SHAPE_SETTINGS,
@@ -438,8 +448,8 @@ class RealnessViews {
     realnessLine.textContent =
       `Dream look, ${this.dreamStrength}: soft bands of color everywhere; the less real a part ` +
       "is, the more it fades into the dream's pastel and swells, and far from the photo it " +
-      "drifts and dissolves (the floor at the photo spot's level holds still). V: strong, subtle " +
-      `or off. ${lights}`;
+      "drifts and dissolves (the floor at the photo spot's level holds still). The pastel turns " +
+      `from warm to cold and back each minute. V: strong, subtle or off. ${lights}`;
   }
 }
 

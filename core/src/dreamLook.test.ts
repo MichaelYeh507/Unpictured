@@ -1,11 +1,13 @@
 import { expect, test } from "vitest";
 import {
   checkDreamSettings,
+  coldnessAt,
   DREAM_SETTINGS,
   type DreamSettings,
   dreamColor,
   dreamIntensity,
   LUMA,
+  paletteAt,
   toonColor,
   washColor,
 } from "./dreamLook.ts";
@@ -19,8 +21,8 @@ const NONE: DreamSettings = {
   saturation: 1,
   tint: 0,
   paperLift: 0,
-  paper: PAPER,
-  pigment: PIGMENT,
+  warm: { paper: PAPER, pigment: PIGMENT },
+  cold: { paper: PAPER, pigment: PIGMENT },
 };
 /** The toon settings the worked toon cases use, whatever the defaults become. */
 const TOON: DreamSettings = {
@@ -69,7 +71,43 @@ test("the toon step keeps the hue and makes the color livelier (worked separatel
 test("the dream color is the wash of the toon color", () => {
   const rgb: Vec3 = [0.7, 0.4, 0.2];
   expect(dreamColor(rgb, 0.6)).toEqual(washColor(toonColor(rgb), 0.6));
+  expect(dreamColor(rgb, 0.6, DREAM_SETTINGS, 0.4)).toEqual(
+    washColor(toonColor(rgb), 0.6, DREAM_SETTINGS, 0.4),
+  );
   expect(dreamColor(rgb, 0)).toEqual(toonColor(rgb));
+});
+
+test("the palette turns from warm to cold and back each cycle, easing at both ends", () => {
+  const cycle: DreamSettings = { ...DREAM_SETTINGS, cycleSeconds: 60 };
+  expect(coldnessAt(0, cycle)).toBe(0);
+  expect(coldnessAt(10, cycle)).toBeCloseTo(0.25, 12); // (1 - cos 60 degrees) / 2, not 1/3
+  expect(coldnessAt(15, cycle)).toBeCloseTo(0.5, 12);
+  expect(coldnessAt(30, cycle)).toBeCloseTo(1, 12);
+  expect(coldnessAt(50, cycle)).toBeCloseTo(0.25, 12);
+  expect(coldnessAt(70, cycle)).toBeCloseTo(0.25, 12); // the next cycle
+  expect(coldnessAt(5, { ...cycle, cycleSeconds: 20 })).toBeCloseTo(0.5, 12);
+});
+
+test("the wash uses the palette blended from warm to cold (worked by hand)", () => {
+  const twoEnds: DreamSettings = {
+    ...NONE,
+    warm: { paper: [1, 0.9, 0.8], pigment: [0.6, 0.2, 0.2] },
+    cold: { paper: [0.8, 0.9, 1], pigment: [0.2, 0.2, 0.6] },
+  };
+  const quarter = paletteAt(0.25, twoEnds);
+  expectColor(quarter.paper, [0.95, 0.9, 0.85]);
+  expectColor(quarter.pigment, [0.5, 0.2, 0.3]);
+  expectColor(paletteAt(0, twoEnds).pigment, [0.6, 0.2, 0.2]);
+  expectColor(paletteAt(1, twoEnds).paper, [0.8, 0.9, 1]);
+  // Full tint: black takes the blended pigment, white the blended paper.
+  const fullTint: DreamSettings = { ...twoEnds, tint: 1 };
+  expectColor(washColor([0, 0, 0], 1, fullTint, 0.25), [0.5, 0.2, 0.3]);
+  expectColor(washColor([1, 1, 1], 1, fullTint, 0.25), [0.95, 0.9, 0.85]);
+  // The paper lift goes toward the blended paper too.
+  const halfLift: DreamSettings = { ...twoEnds, paperLift: 0.5 };
+  expectColor(washColor([0, 0, 0], 1, halfLift, 1), [0.4, 0.45, 0.5]);
+  // What the photos saw (intensity 0) keeps its colors at any point of the cycle.
+  expect(washColor([0.3, 0.6, 0.9], 0, twoEnds, 0.7)).toEqual([0.3, 0.6, 0.9]);
 });
 
 test("at intensity 0 the wash leaves a color exactly as it was", () => {
@@ -142,8 +180,12 @@ test("settings the shader cannot use are refused", () => {
     [{ saturation: -0.1 }, /0 to 1/],
     [{ tint: 1.5 }, /0 to 1/],
     [{ paperLift: Number.NaN }, /0 to 1/],
-    [{ paper: [0.9, 1.2, 0.9] }, /0 to 1/],
-    [{ pigment: [-0.1, 0.3, 0.5] }, /0 to 1/],
+    [{ warm: { ...DREAM_SETTINGS.warm, paper: [0.9, 1.2, 0.9] } }, /0 to 1/],
+    [{ warm: { ...DREAM_SETTINGS.warm, pigment: [0.5, 0.3, 1.1] } }, /0 to 1/],
+    [{ cold: { ...DREAM_SETTINGS.cold, paper: [0.9, 0.9, -0.1] } }, /0 to 1/],
+    [{ cold: { ...DREAM_SETTINGS.cold, pigment: [-0.1, 0.3, 0.5] } }, /0 to 1/],
+    [{ cycleSeconds: 0 }, /cycleSeconds/],
+    [{ cycleSeconds: Number.POSITIVE_INFINITY }, /cycleSeconds/],
   ];
   for (const [change, message] of bad) {
     expect(() => checkDreamSettings({ ...DREAM_SETTINGS, ...change })).toThrow(message);

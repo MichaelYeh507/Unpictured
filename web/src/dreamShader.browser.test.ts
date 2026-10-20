@@ -49,9 +49,9 @@ const cameras = parseCameraFile({
 const cameraHeight = 1.5;
 const lightList: MemoryLight[] = [{ position: [-20, 0, 5], radius: 4 * cameraHeight }];
 
-/** The dream look's inputs, with fresh uniforms for strength and seconds. */
+/** The dream look's inputs, with fresh uniforms for strength, seconds and coldness. */
 type Uniform = ReturnType<typeof dyno.dynoFloat>;
-function inputs(): DreamInputs & { strength: Uniform; seconds: Uniform } {
+function inputs(): DreamInputs & { strength: Uniform; seconds: Uniform; coldness: Uniform } {
   const lights = new RealnessLights();
   lights.set(lightList, REALNESS_SETTINGS);
   return {
@@ -61,6 +61,7 @@ function inputs(): DreamInputs & { strength: Uniform; seconds: Uniform } {
     lights,
     strength: dyno.dynoFloat(1),
     seconds: dyno.dynoFloat(0),
+    coldness: dyno.dynoFloat(0),
   };
 }
 
@@ -92,14 +93,15 @@ function sampleSplats(): PackedSplats {
   return splats;
 }
 
-test("the dream look washes sample splats as the reference does, at every strength", async () => {
+test("the dream look washes sample splats as the reference does, at every strength and coldness", async () => {
   const splats = sampleSplats();
   const count = splats.numSplats;
   const { centers, colors } = await gpu.splatsAsStored(splats);
   const dream = inputs();
   const look = dreamLook(dream, DREAM_SETTINGS);
 
-  // One reader per channel, built once: the strength changes between reads without a rebuild.
+  // One reader per channel, built once: strength and coldness change between reads without a
+  // rebuild.
   const channelReader = (pick: "r" | "g" | "b") =>
     floatReader((index) => {
       const splat = dyno.readPackedSplat(splats.dyno, index);
@@ -113,24 +115,33 @@ test("the dream look washes sample splats as the reference does, at every streng
   };
 
   let programs: number | undefined;
-  for (const level of [1, 0.5, 2]) {
+  const settings: [number, number][] = [
+    [1, 0],
+    [0.5, 0.3],
+    [2, 1],
+    [1, 0.75],
+  ];
+  for (const [level, coldness] of settings) {
     dream.strength.value = level;
+    dream.coldness.value = coldness;
     const shown = await readColors();
     programs ??= gpu.renderer.info.programs?.length;
     let partly = 0;
     for (const [i, center] of centers.entries()) {
       const seen = realness(center, cameras, cameraHeight, lightList, REALNESS_SETTINGS);
       const intensity = dreamIntensity(seen, level);
-      const expected = dreamColor(colors[i] ?? [0, 0, 0], intensity, DREAM_SETTINGS);
+      const rgb = colors[i] ?? [0, 0, 0];
+      const expected = dreamColor(rgb, intensity, DREAM_SETTINGS, coldness);
+      const label = `strength ${level}, coldness ${coldness}, splat ${i}`;
       expected.forEach((value, channel) => {
-        expect(shown[i]?.[channel], `strength ${level}, splat ${i}`).toBeCloseTo(value, 5);
+        expect(shown[i]?.[channel], label).toBeCloseTo(value, 5);
       });
       if (intensity > 0.01 && intensity < 0.99) {
         partly += 1;
       }
     }
     // The sample must reach the soft edges, not only the plainly seen and plainly dreamed.
-    expect(partly, `strength ${level}`).toBeGreaterThan(50);
+    expect(partly, `strength ${level}, coldness ${coldness}`).toBeGreaterThan(50);
   }
 
   // Strength 0 leaves only the toon step (the viewer's "off" removes the modifier instead).

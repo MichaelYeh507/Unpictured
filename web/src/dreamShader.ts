@@ -22,8 +22,8 @@ import {
 } from "@unpictured/core";
 import { glslFloat, type RealnessLights, realnessOf, requireName, vec } from "./realnessShader.ts";
 
-/** What the dream look reads besides each splat. Strength and seconds are uniforms: after
- * changing one, call updateVersion() on the SplatMesh. */
+/** What the dream look reads besides each splat. Strength, seconds and coldness are uniforms:
+ * after changing one, call updateVersion() on the SplatMesh. */
 export interface DreamInputs {
   cameras: readonly PhotoCamera[];
   /** The photo spot's height above the floor, in raw units. */
@@ -34,6 +34,8 @@ export interface DreamInputs {
   strength: dyno.DynoVal<"float">;
   /** Seconds, for the drift. */
   seconds: dyno.DynoVal<"float">;
+  /** How far the palette has turned from warm (0) to cold (1): coldnessAt in core. */
+  coldness: dyno.DynoVal<"float">;
 }
 
 /** A modifier for a SplatMesh in the raw frame (objectModifier) that draws each splat in the
@@ -43,7 +45,7 @@ export function dreamLook(
   look: DreamSettings = DREAM_SETTINGS,
   shape: DreamShapeSettings = DREAM_SHAPE_SETTINGS,
 ): GsplatModifier {
-  const { cameras, cameraHeight, realness: settings, lights, strength, seconds } = inputs;
+  const { cameras, cameraHeight, realness: settings, lights, strength, seconds, coldness } = inputs;
   checkRealnessInputs(cameraHeight, settings);
   checkDreamSettings(look);
   checkDreamShapeSettings(shape);
@@ -57,7 +59,7 @@ export function dreamLook(
     return {
       gsplat: dyno.combineGsplat({
         gsplat,
-        rgb: dreamColorOf(rgb, realness, strength, look),
+        rgb: dreamColorOf(rgb, realness, strength, coldness, look),
         center: driftedCenterOf(center, index, depth, seconds, cameraHeight, shape),
         scales: swollenScalesOf(scales, realness, strength, depth, shape),
         opacity: dissolvedOpacityOf(opacity, depth, shape),
@@ -66,21 +68,23 @@ export function dreamLook(
   });
 }
 
-/** A color in the dream look at intensity (1 - realness) times the strength, at most 1
- * (dreamColor in core). */
+/** A color in the dream look at intensity (1 - realness) times the strength, at most 1, and at
+ * this coldness of the palette (dreamColor in core). */
 export function dreamColorOf(
   rgb: dyno.DynoVal<"vec3">,
   realness: dyno.DynoVal<"float">,
   strength: dyno.DynoVal<"float">,
+  coldness: dyno.DynoVal<"float">,
   dream: DreamSettings,
 ): dyno.DynoVal<"vec3"> {
   checkDreamSettings(dream);
   const node = new dyno.Dyno({
-    inTypes: { rgb: "vec3", realness: "float", strength: "float" },
+    inTypes: { rgb: "vec3", realness: "float", strength: "float", coldness: "float" },
     outTypes: { color: "vec3" },
-    inputs: { rgb, realness, strength },
+    inputs: { rgb, realness, strength, coldness },
     statements: ({ inputs, outputs }) => {
       const color = requireName(inputs.rgb);
+      const cold = requireName(inputs.coldness);
       const bands = glslFloat(dream.bands);
       const soft = glslFloat(dream.bandSoftness);
       return [
@@ -98,10 +102,12 @@ export function dreamColorOf(
         `float toonLuma = dot(toon, ${vec(LUMA)});`,
         `float keep = mix(1.0, ${glslFloat(dream.saturation)}, intensity);`,
         "vec3 muted = mix(vec3(toonLuma), toon, keep);",
-        `vec3 palette = mix(${vec(dream.pigment)}, ${vec(dream.paper)}, toonLuma);`,
+        `vec3 paper = mix(${vec(dream.warm.paper)}, ${vec(dream.cold.paper)}, ${cold});`,
+        `vec3 pigment = mix(${vec(dream.warm.pigment)}, ${vec(dream.cold.pigment)}, ${cold});`,
+        "vec3 palette = mix(pigment, paper, toonLuma);",
         `vec3 tinted = mix(muted, palette, ${glslFloat(dream.tint)} * intensity);`,
         `float lift = ${glslFloat(dream.paperLift)} * intensity;`,
-        `${requireName(outputs.color)} = mix(tinted, ${vec(dream.paper)}, lift);`,
+        `${requireName(outputs.color)} = mix(tinted, paper, lift);`,
       ];
     },
   });
