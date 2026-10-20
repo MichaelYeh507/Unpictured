@@ -13,7 +13,7 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "check:ts": "npm run lint && npm run typecheck && npm run test && npm run build",
-    "check:pipeline": "uv run --locked --directory pipeline ruff check && uv run --locked --directory pipeline ruff format --check && uv run --locked --directory pipeline pytest",
+    "check:pipeline": "uv run --locked --directory pipeline ruff check && uv run --locked --directory pipeline ruff format --check && uv run --locked --directory pipeline python -m pytest",
     "check": "npm run check:ts && npm run check:pipeline"
   },
   "devDependencies": {
