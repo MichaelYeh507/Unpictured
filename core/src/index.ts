@@ -1,5 +1,6 @@
 export * from "./camera.ts";
 export * from "./collider.ts";
+export * from "./dreamLook.ts";
 export {
   floorUnderPhotoSpot,
   heightBelow,

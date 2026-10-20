@@ -1,5 +1,14 @@
-import { type GsplatModifier, SparkControls, SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
 import {
+  dyno,
+  type GsplatModifier,
+  SparkControls,
+  SparkRenderer,
+  SplatMesh,
+} from "@sparkjsdev/spark";
+import {
+  DREAM_SETTINGS,
+  DREAM_STRENGTHS,
+  type DreamStrength,
   isSplatDetail,
   isWorldName,
   MAX_LIGHTS,
@@ -20,10 +29,12 @@ import {
   type WorldPlacement,
 } from "@unpictured/core";
 import * as THREE from "three";
+import { dreamLook } from "./dreamShader.ts";
 import { buildPhotoFrame, fieldOfViewFor } from "./photoFrames.ts";
 import { RealnessLights, realnessHeatmap } from "./realnessShader.ts";
 import { buildFloorOverlay, describeFloor } from "./walkableFloor.ts";
 
+const hud = requireElement("hud");
 const statusLine = requireElement("status");
 const positionLine = requireElement("position");
 const noticeLine = requireElement("notice");
@@ -43,10 +54,14 @@ scene.add(new SparkRenderer({ renderer }));
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.05, 500);
 const controls = new SparkControls({ canvas: renderer.domElement });
 
+// Everything drawn that is not the world (grid, axes, photo frames, floor overlay), so H can
+// hide it all for a clean view.
+const helpers = new THREE.Group();
+scene.add(helpers);
+
 // Scale references: a grid on the ground (y = 0) with 1-unit cells, and 1-unit axes
 // (x red, y green, z blue). A unit is a metre only when the world has metric data.
-scene.add(new THREE.GridHelper(20, 20));
-scene.add(new THREE.AxesHelper(1));
+helpers.add(new THREE.GridHelper(20, 20), new THREE.AxesHelper(1));
 let unitLabel = "m";
 
 window.addEventListener("resize", () => {
@@ -116,7 +131,7 @@ async function loadWorld(): Promise<void> {
     buildPhotoFrame(photoCamera, placement, `/worlds/${name}/${photoCamera.photo}`),
   );
   for (const frame of frames) {
-    scene.add(frame.outline, frame.overlay);
+    helpers.add(frame.outline, frame.overlay);
   }
   const [firstCamera] = photoCameras;
   const [firstFrame] = frames;
@@ -129,11 +144,21 @@ async function loadWorld(): Promise<void> {
   const colliderFile = meta.files.collider;
   const loadCollider = colliderLoader(`/worlds/${name}/${colliderFile}`);
   const walkable = new WalkableFloorToggle(loadCollider, placement, photoCameras);
-  const realness = new RealnessToggle(splats, loadCollider, placement, photoCameras);
+  const realness = new RealnessViews(splats, loadCollider, placement, photoCameras);
   const canShowRealness = colliderFile !== undefined && photoCameras.length > 0;
+  if (canShowRealness) {
+    void realness.start();
+  } else {
+    const problem = "No dream look: it needs the photo frames (camera.json) and a collider.";
+    noticeLine.textContent = `${noticeLine.textContent} ${problem}`.trim();
+  }
   window.addEventListener("keydown", (event) => {
     if (event.repeat) {
       return; // a held key toggles once
+    }
+    if (event.code === "KeyH") {
+      helpers.visible = !helpers.visible;
+      hud.style.visibility = helpers.visible ? "visible" : "hidden";
     }
     if (event.code === "KeyO") {
       for (const frame of frames) {
@@ -144,7 +169,10 @@ async function loadWorld(): Promise<void> {
       void walkable.toggle();
     }
     if (event.code === "KeyR" && canShowRealness) {
-      void realness.toggle();
+      void realness.toggleHeatmap();
+    }
+    if (event.code === "KeyV" && canShowRealness) {
+      void realness.nextDreamStrength();
     }
     if (event.code === "KeyL" && canShowRealness) {
       if (event.shiftKey) {
@@ -162,9 +190,9 @@ async function loadWorld(): Promise<void> {
   const photoHint = frames.length > 0 ? ", O shows the photo in its frame" : "";
   const floorHint = colliderFile !== undefined ? ", N shows the walkable floor" : "";
   const realnessHint = canShowRealness
-    ? ", R shows how real each splat is, L drops a light where you look"
+    ? ", V changes the dream look, R shows how real each splat is, L drops a light where you look"
     : "";
-  statusLine.textContent = `${name} (${splatFile}): drag to look, W A S D to move, E up, Q down${photoHint}${floorHint}${realnessHint}`;
+  statusLine.textContent = `${name} (${splatFile}): drag to look, W A S D to move, E up, Q down${photoHint}${floorHint}${realnessHint}, H hides everything but the world`;
 }
 
 /** Measures the walkable floor the first time it is asked for, then shows or hides it. */
@@ -205,7 +233,7 @@ class WalkableFloorToggle {
       ]);
       const floor = await measureWalkableFloor(collider, this.placement, this.photoCameras);
       this.overlay = buildFloorOverlay(floor);
-      scene.add(this.overlay);
+      helpers.add(this.overlay);
       this.description = describeFloor(floor);
       walkableLine.textContent = this.description;
     } catch (error) {
@@ -216,19 +244,24 @@ class WalkableFloorToggle {
   }
 }
 
-/** Colors every splat by how real it is (blue seen by a photo or near a memory light, pink
- * imagined), working out the photo spot's height above the floor the first time. Test lights are
- * sized in camera heights and placed in the raw frame. */
-class RealnessToggle {
+/** Shows the world through the dream look (the default) or as a realness heatmap. Both read the
+ * same realness, so test lights show in either (not with the dream off); they are sized in camera
+ * heights and placed in the raw frame. The photo spot's height above the floor comes first. */
+class RealnessViews {
   private readonly splats: SplatMesh;
   private readonly loadCollider: () => Promise<TriangleMesh>;
   private readonly placement: WorldPlacement;
   private readonly photoCameras: PhotoCamera[];
   private readonly lights = new RealnessLights();
+  private readonly strength = dyno.dynoFloat(DREAM_STRENGTHS.strong);
+  private dream: GsplatModifier | undefined;
   private heatmap: GsplatModifier | undefined;
+  /** What the splats were last given: Spark's objectModifier cannot be read back. */
+  private applied: GsplatModifier | undefined;
+  private showHeatmap = false;
+  private dreamStrength: DreamStrength = "strong";
   private cameraHeight = 1;
-  private shown = false;
-  private preparing = false;
+  private preparation: Promise<boolean> | undefined;
   /** The newest light's radius, and the next one's, in camera heights. */
   private lightSize = 1;
 
@@ -244,22 +277,44 @@ class RealnessToggle {
     this.photoCameras = photoCameras;
   }
 
-  async toggle(): Promise<void> {
+  /** Shows the dream look once it is ready. */
+  async start(): Promise<void> {
     if (await this.prepare()) {
-      this.show(!this.shown);
+      this.show();
     }
   }
 
-  /** Adds a light at a raw-frame point, showing realness if it is hidden. When all MAX_LIGHTS
-   * are in use, the oldest one goes. */
+  async toggleHeatmap(): Promise<void> {
+    if (await this.prepare()) {
+      this.showHeatmap = !this.showHeatmap;
+      this.show();
+    }
+  }
+
+  /** From the heatmap, back to the dream look; otherwise strong, then subtle, then off (the
+   * splats as Marble made them), and round again. */
+  async nextDreamStrength(): Promise<void> {
+    if (!(await this.prepare())) {
+      return;
+    }
+    if (this.showHeatmap) {
+      this.showHeatmap = false;
+    } else {
+      const order: DreamStrength[] = ["strong", "subtle", "off"];
+      const next = (order.indexOf(this.dreamStrength) + 1) % order.length;
+      this.dreamStrength = order[next] ?? "strong";
+    }
+    this.show();
+  }
+
+  /** Adds a light at a raw-frame point. When all MAX_LIGHTS are in use, the oldest one goes. */
   async dropLight(rawPoint: Vec3): Promise<void> {
     if (!(await this.prepare())) {
       return;
     }
     const light: MemoryLight = { position: rawPoint, radius: this.lightSize * this.cameraHeight };
     this.lights.set([...this.lights.lights, light].slice(-MAX_LIGHTS), REALNESS_SETTINGS);
-    this.splats.updateVersion();
-    this.show(true);
+    this.show(); // also applies the view when a failed start left none
   }
 
   clearLights(): void {
@@ -281,15 +336,19 @@ class RealnessToggle {
     this.describe();
   }
 
-  /** Builds the heatmap the first time; false (with the reason on screen) if it cannot. */
-  private async prepare(): Promise<boolean> {
-    if (this.heatmap !== undefined) {
-      return true;
+  /** Builds both views the first time; false (with the reason on screen) if it cannot. Keys
+   * pressed meanwhile wait for the same attempt, and a failed attempt is tried again later. */
+  private prepare(): Promise<boolean> {
+    if (this.dream !== undefined) {
+      return Promise.resolve(true);
     }
-    if (this.preparing) {
-      return false;
-    }
-    this.preparing = true;
+    this.preparation ??= this.build().finally(() => {
+      this.preparation = undefined;
+    });
+    return this.preparation;
+  }
+
+  private async build(): Promise<boolean> {
     realnessLine.textContent = "Working out how real each splat is...";
     try {
       const cameraHeight = photoSpotHeight(await this.loadCollider(), this.placement);
@@ -297,52 +356,70 @@ class RealnessToggle {
         throw new Error("the collider has no floor below or near the photo spot");
       }
       this.cameraHeight = cameraHeight;
-      this.heatmap = realnessHeatmap(
-        this.photoCameras,
+      const cameras = this.photoCameras;
+      const settings = REALNESS_SETTINGS;
+      this.heatmap = realnessHeatmap(cameras, cameraHeight, settings, this.lights);
+      this.dream = dreamLook(
+        cameras,
         cameraHeight,
-        REALNESS_SETTINGS,
+        settings,
         this.lights,
+        this.strength,
+        DREAM_SETTINGS,
       );
       return true;
     } catch (error) {
-      realnessLine.textContent = `Could not show realness: ${errorMessage(error)}`;
+      realnessLine.textContent = `Could not show the dream look or realness: ${errorMessage(error)}`;
       return false;
-    } finally {
-      this.preparing = false;
     }
   }
 
-  private show(shown: boolean): void {
-    if (shown !== this.shown) {
-      this.shown = shown;
-      this.splats.objectModifier = shown ? this.heatmap : undefined;
+  /** The heatmap, the dream look, or (with the dream off) the splats as Marble made them. */
+  private show(): void {
+    const dreamOff = this.dreamStrength === "off";
+    const modifier = this.showHeatmap ? this.heatmap : dreamOff ? undefined : this.dream;
+    if (modifier !== this.applied) {
+      this.applied = modifier;
+      this.splats.objectModifier = modifier;
       this.splats.updateGenerator();
     }
-    if (shown) {
-      this.describe();
-    } else {
-      realnessLine.textContent = "";
-    }
+    this.strength.value = DREAM_STRENGTHS[this.dreamStrength];
+    this.splats.updateVersion();
+    this.describe();
   }
 
-  /** The legend, while the heatmap is shown; while it is hidden, the line keeps any message. */
+  /** The legend for what is shown. Until the views are ready, the line keeps any message. */
   private describe(): void {
-    if (!this.shown) {
+    if (this.dream === undefined) {
       return;
     }
-    const { nearOk, farLimit } = REALNESS_SETTINGS;
     const size = this.lightSize === 1 ? "1 camera height" : `${this.lightSize} camera heights`;
+    const lights =
+      `L drops a light where you look, [ and ] shrink or grow the newest one (now ${size}, ` +
+      `from 1/8 to 8), Shift+L clears. Lights: ${this.lights.lights.length} of ${MAX_LIGHTS}.`;
+    if (this.showHeatmap) {
+      const { nearOk, farLimit } = REALNESS_SETTINGS;
+      realnessLine.textContent =
+        `Realness: blue was in a photo or is near a light, pink is imagined. Real up to ` +
+        `${nearOk} camera heights from the photo spot, imagined from ${farLimit}. ${lights} ` +
+        "R or V hides the heatmap.";
+      return;
+    }
+    if (this.dreamStrength === "off") {
+      realnessLine.textContent =
+        "Dream look off: the splats as Marble made them. V: strong, subtle or off. Lights " +
+        `(${this.lights.lights.length} of ${MAX_LIGHTS}) show in the dream look and the heatmap.`;
+      return;
+    }
     realnessLine.textContent =
-      `Realness: blue was in a photo or is near a light, pink is imagined. Real up to ${nearOk} ` +
-      `camera heights from the photo spot, imagined from ${farLimit}. L drops a light where you ` +
-      `look, [ and ] shrink or grow the newest one (now ${size}, from 1/8 to 8), Shift+L clears. ` +
-      `Lights: ${this.lights.lights.length} of ${MAX_LIGHTS}.`;
+      `Dream look, ${this.dreamStrength}: soft bands of color everywhere, and the less real a ` +
+      `part is, the more it fades into the dream's pastel. V: strong, subtle or off. ${lights}`;
   }
 }
 
 /** Drops a test light on the splat at the middle of the screen. */
 async function dropLightWhereLooking(
-  realness: RealnessToggle,
+  realness: RealnessViews,
   splats: SplatMesh,
   placement: WorldPlacement,
 ): Promise<void> {

@@ -2,8 +2,8 @@
 
 Realness says how much of a world is real, from 1 to 0 (imagined by the world model): either a
 source photo saw it, or a memory light (a piece the player restored) shines on it. It drives the
-game's look and rules later; for now the viewer shows it as a heatmap (key R): blue is real, pink
-is imagined.
+dream look (`docs/DREAM_LOOK.md`) and, later, the game's rules. The viewer can also show it as a
+heatmap (key R): blue is real, pink is imagined.
 
 This file is the contract for every implementation: the TypeScript reference
 (`core/src/realness.ts`), the shader (`web/src/realnessShader.ts`), and a later Unreal Engine
