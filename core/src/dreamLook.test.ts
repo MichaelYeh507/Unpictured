@@ -131,7 +131,8 @@ test("taking out saturation keeps a color's brightness", () => {
 test("settings the shader cannot use are refused", () => {
   expect(() => checkDreamSettings(DREAM_SETTINGS)).not.toThrow();
   const bad: [Partial<DreamSettings>, RegExp][] = [
-    [{ bands: 0.5 }, /bands/],
+    [{ bands: 0 }, /bands/],
+    [{ bands: 2.5 }, /bands/],
     [{ bands: Number.POSITIVE_INFINITY }, /bands/],
     [{ bandSoftness: 0 }, /bandSoftness/],
     [{ bandSoftness: 0.6 }, /bandSoftness/],

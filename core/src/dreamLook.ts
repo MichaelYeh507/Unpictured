@@ -8,7 +8,7 @@ import type { Vec3 } from "./frames.ts";
 import { smoothstep } from "./realness.ts";
 
 export interface DreamSettings {
-  /** How many bands of brightness the toon step leaves. */
+  /** Whole bands of brightness: a color snaps to one of bands + 1 levels. */
   bands: number;
   /** Half the width of the soft edge between two bands, as a share of a band. */
   bandSoftness: number;
@@ -28,7 +28,8 @@ export interface DreamSettings {
   pigment: Vec3;
 }
 
-/** Look "B3" with the cotton-candy palette, picked by eye (2026-10-20). */
+/** Picked by eye from look-development screenshots (2026-10-20): soft toon bands and the
+ * "cotton candy" palette, pink to orchid. */
 export const DREAM_SETTINGS: DreamSettings = {
   bands: 4,
   bandSoftness: 0.04,
@@ -103,8 +104,8 @@ export function washColor(
 export function checkDreamSettings(settings: DreamSettings): void {
   const { bands, bandSoftness, shadowFloor, vivid } = settings;
   const { saturation, tint, paperLift, paper, pigment } = settings;
-  if (!(bands >= 1) || !Number.isFinite(bands)) {
-    throw new Error("dream look: bands must be a finite number, at least 1");
+  if (!Number.isInteger(bands) || bands < 1) {
+    throw new Error("dream look: bands must be a whole number, at least 1");
   }
   // GLSL's smoothstep needs a real width, and the edges of a band must not overlap.
   if (!(bandSoftness > 0 && bandSoftness <= 0.5)) {
@@ -127,7 +128,7 @@ function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
-/** GLSL's mix, written the same way so both round alike. */
+/** The same formula as GLSL's mix. */
 function mix(a: number, b: number, t: number): number {
   return a * (1 - t) + b * t;
 }

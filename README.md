@@ -60,6 +60,13 @@ unpictured, gray out of reach, with the areas on screen. Outdoors the world ofte
 right under the photo spot, which the photo never saw; then N measures from the nearest floor and
 says how far away that is.
 
+With `camera.json` and a collider, the world shows in the dream look (`docs/DREAM_LOOK.md`): soft
+bands of color everywhere, and the less real a part is (`docs/REALNESS.md`), the more it fades into
+the dream's pastel. V switches it between strong, subtle and off (the splats as Marble made them).
+R shows realness as a heatmap instead, blue real and pink imagined. L drops a test memory light on
+whatever is in the middle of the screen, [ and ] shrink or grow it, and Shift+L clears them. H
+hides everything but the world, for clean screenshots.
+
 Phones need a lighter splat file: add `&splats=500k` or `&splats=100k` to the address
 (`&splats=full_res` asks for the most detailed). If the world lacks that size, the viewer takes the
 next smaller file, or its smallest file when nothing is that small. The status line names the file

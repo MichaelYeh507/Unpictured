@@ -3,6 +3,7 @@ import {
   DREAM_SETTINGS,
   dreamColor,
   dreamIntensity,
+  LUMA,
   type MemoryLight,
   parseCameraFile,
   REALNESS_SETTINGS,
@@ -94,9 +95,11 @@ test("the dream look washes sample splats as the reference does, at every streng
     return colors.map((_, i) => [r?.[i], g?.[i], b?.[i]]);
   };
 
+  let programs: number | undefined;
   for (const level of [1, 0.5, 2]) {
     strength.value = level;
     const shown = await readColors();
+    programs ??= gpu.renderer.info.programs?.length;
     let partly = 0;
     for (const [i, center] of centers.entries()) {
       const seen = realness(center, cameras, cameraHeight, lightList, REALNESS_SETTINGS);
@@ -121,6 +124,15 @@ test("the dream look washes sample splats as the reference does, at every streng
       expect(toonOnly[i]?.[channel], `strength 0, splat ${i}`).toBeCloseTo(value, 5);
     });
   }
+  expect(gpu.renderer.info.programs?.length, "shader programs").toBe(programs);
+
+  // Some colors must sit on the soft edge between two toon bands, where the step is steepest.
+  const { bands, bandSoftness } = DREAM_SETTINGS;
+  const onEdge = colors.filter(([r, g, b]) => {
+    const steps = (r * LUMA[0] + g * LUMA[1] + b * LUMA[2]) * bands;
+    return Math.abs(steps - Math.floor(steps) - 0.5) < bandSoftness;
+  }).length;
+  expect(onEdge).toBeGreaterThan(20);
 });
 
 test("the dream look refuses bad inputs when it is made, not later inside Spark's render", () => {

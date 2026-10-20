@@ -192,7 +192,7 @@ async function loadWorld(): Promise<void> {
   const realnessHint = canShowRealness
     ? ", V changes the dream look, R shows how real each splat is, L drops a light where you look"
     : "";
-  statusLine.textContent = `${name} (${splatFile}): drag to look, W A S D to move, E up, Q down${photoHint}${floorHint}${realnessHint}, H hides all text and lines`;
+  statusLine.textContent = `${name} (${splatFile}): drag to look, W A S D to move, E up, Q down${photoHint}${floorHint}${realnessHint}, H hides everything but the world`;
 }
 
 /** Measures the walkable floor the first time it is asked for, then shows or hides it. */
@@ -245,8 +245,8 @@ class WalkableFloorToggle {
 }
 
 /** Shows the world through the dream look (the default) or as a realness heatmap. Both read the
- * same realness, so test lights show in either; they are sized in camera heights and placed in
- * the raw frame. The photo spot's height above the floor is worked out first. */
+ * same realness, so test lights show in either (not with the dream off); they are sized in camera
+ * heights and placed in the raw frame. The photo spot's height above the floor comes first. */
 class RealnessViews {
   private readonly splats: SplatMesh;
   private readonly loadCollider: () => Promise<TriangleMesh>;
@@ -256,10 +256,12 @@ class RealnessViews {
   private readonly strength = dyno.dynoFloat(DREAM_STRENGTHS.strong);
   private dream: GsplatModifier | undefined;
   private heatmap: GsplatModifier | undefined;
+  /** What the splats were last given: Spark's objectModifier cannot be read back. */
+  private applied: GsplatModifier | undefined;
   private showHeatmap = false;
   private dreamStrength: DreamStrength = "strong";
   private cameraHeight = 1;
-  private preparing = false;
+  private preparation: Promise<boolean> | undefined;
   /** The newest light's radius, and the next one's, in camera heights. */
   private lightSize = 1;
 
@@ -289,16 +291,20 @@ class RealnessViews {
     }
   }
 
-  /** Strong, then subtle, then off (the splats as Marble made them), and round again; back to
-   * the dream look. */
+  /** From the heatmap, back to the dream look; otherwise strong, then subtle, then off (the
+   * splats as Marble made them), and round again. */
   async nextDreamStrength(): Promise<void> {
-    if (await this.prepare()) {
+    if (!(await this.prepare())) {
+      return;
+    }
+    if (this.showHeatmap) {
+      this.showHeatmap = false;
+    } else {
       const order: DreamStrength[] = ["strong", "subtle", "off"];
       const next = (order.indexOf(this.dreamStrength) + 1) % order.length;
       this.dreamStrength = order[next] ?? "strong";
-      this.showHeatmap = false;
-      this.show();
     }
+    this.show();
   }
 
   /** Adds a light at a raw-frame point. When all MAX_LIGHTS are in use, the oldest one goes. */
@@ -308,8 +314,7 @@ class RealnessViews {
     }
     const light: MemoryLight = { position: rawPoint, radius: this.lightSize * this.cameraHeight };
     this.lights.set([...this.lights.lights, light].slice(-MAX_LIGHTS), REALNESS_SETTINGS);
-    this.splats.updateVersion();
-    this.describe();
+    this.show(); // also applies the view when a failed start left none
   }
 
   clearLights(): void {
@@ -331,15 +336,19 @@ class RealnessViews {
     this.describe();
   }
 
-  /** Builds both views the first time; false (with the reason on screen) if it cannot. */
-  private async prepare(): Promise<boolean> {
+  /** Builds both views the first time; false (with the reason on screen) if it cannot. Keys
+   * pressed meanwhile wait for the same attempt, and a failed attempt is tried again later. */
+  private prepare(): Promise<boolean> {
     if (this.dream !== undefined) {
-      return true;
+      return Promise.resolve(true);
     }
-    if (this.preparing) {
-      return false;
-    }
-    this.preparing = true;
+    this.preparation ??= this.build().finally(() => {
+      this.preparation = undefined;
+    });
+    return this.preparation;
+  }
+
+  private async build(): Promise<boolean> {
     realnessLine.textContent = "Working out how real each splat is...";
     try {
       const cameraHeight = photoSpotHeight(await this.loadCollider(), this.placement);
@@ -362,8 +371,6 @@ class RealnessViews {
     } catch (error) {
       realnessLine.textContent = `Could not show the dream look or realness: ${errorMessage(error)}`;
       return false;
-    } finally {
-      this.preparing = false;
     }
   }
 
@@ -371,7 +378,8 @@ class RealnessViews {
   private show(): void {
     const dreamOff = this.dreamStrength === "off";
     const modifier = this.showHeatmap ? this.heatmap : dreamOff ? undefined : this.dream;
-    if (this.splats.objectModifier !== modifier) {
+    if (modifier !== this.applied) {
+      this.applied = modifier;
       this.splats.objectModifier = modifier;
       this.splats.updateGenerator();
     }
@@ -394,15 +402,18 @@ class RealnessViews {
       realnessLine.textContent =
         `Realness: blue was in a photo or is near a light, pink is imagined. Real up to ` +
         `${nearOk} camera heights from the photo spot, imagined from ${farLimit}. ${lights} ` +
-        "R goes back to the dream look.";
+        "R or V hides the heatmap.";
       return;
     }
-    const look =
-      this.dreamStrength === "off"
-        ? "Dream look off: the splats as Marble made them."
-        : `Dream look, ${this.dreamStrength}: soft bands of color everywhere, and the less real ` +
-          "a part is, the more it fades into the dream's pastel.";
-    realnessLine.textContent = `${look} V: strong, subtle or off. ${lights}`;
+    if (this.dreamStrength === "off") {
+      realnessLine.textContent =
+        "Dream look off: the splats as Marble made them. V: strong, subtle or off. Lights " +
+        `(${this.lights.lights.length} of ${MAX_LIGHTS}) show in the dream look and the heatmap.`;
+      return;
+    }
+    realnessLine.textContent =
+      `Dream look, ${this.dreamStrength}: soft bands of color everywhere, and the less real a ` +
+      `part is, the more it fades into the dream's pastel. V: strong, subtle or off. ${lights}`;
   }
 }
 

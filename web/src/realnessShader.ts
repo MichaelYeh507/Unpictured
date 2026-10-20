@@ -152,7 +152,7 @@ export function heatmapColor(
  * "undefined" into the shader, which then fails to compile and reads back as zeros. */
 export function requireName(name: string | undefined): string {
   if (name === undefined) {
-    throw new Error("realness shader: an input or output was not connected");
+    throw new Error("shader: an input or output was not connected");
   }
   return name;
 }

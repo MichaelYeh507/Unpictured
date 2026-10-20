@@ -34,13 +34,14 @@ steps      = brightness * bands
 band       = floor(steps)
 edge       = smoothstep(0.5 - bandSoftness, 0.5 + bandSoftness, steps - band)
 level      = mix(shadowFloor, 1, (band + edge) / bands)      the band's brightness
-banded     = clamp(color * level / max(brightness, 0.02), 0, 1)
+banded     = clamp(color * (level / max(brightness, 0.02)), 0, 1)
 toon       = clamp(mix(brightness of banded, banded, vivid), 0, 1)
 ```
 
-Brightness snaps to the middle of its band, with a soft edge halfway between bands, so the
-result has no jumps (a value just under a band's start gives the same color as one at it). The
-color keeps its hue; `vivid` above 1 pushes it away from gray.
+Brightness rounds to the nearest of `bands + 1` levels (0, 1/bands, ... 1, then lifted by the
+shadow floor), with a soft edge halfway between two levels, so the result has no jumps (a value
+just under a whole step gives the same color as one at it). The color keeps its hue; `vivid`
+above 1 pushes it away from gray.
 
 The wash, by how dreamed the splat is:
 
@@ -57,14 +58,15 @@ washed    = mix(tinted, paper, paperLift * intensity)
 At intensity 0 the wash changes nothing, so what the photos saw shows the toon colors. Off
 removes the whole effect, so the splats show exactly as Marble made them.
 
-`bands` must be at least 1, `bandSoftness` above 0 and at most 0.5 (GLSL's smoothstep needs a
-real width), `vivid` at least 0, and every other setting and color from 0 to 1.
+`bands` must be a whole number, at least 1 (otherwise the top level passes 1),
+`bandSoftness` above 0 and at most 0.5 (GLSL's smoothstep needs a real width), `vivid` at
+least 0, and every other setting and color from 0 to 1.
 
 ## Settings
 
 | Setting | Meaning | Value |
 | --- | --- | --- |
-| `bands` | Bands of brightness | 4 |
+| `bands` | Whole bands of brightness: `bands + 1` levels | 4 |
 | `bandSoftness` | Half the width of the soft edge between bands, as a share of a band | 0.04 |
 | `shadowFloor` | The darkest band's brightness | 0.2 |
 | `vivid` | Color strength after banding | 1.5 |
@@ -81,10 +83,11 @@ plans a palette per level later.
 
 ## Viewer
 
-The dream look is the viewer's default view. V switches it between strong, subtle and off; R
-swaps to the realness heatmap and back; L, [ and ] place and size test lights, which show in
-both. H hides all text and helper lines (grid, axes, photo frames, floor overlay) for clean
-screenshots and clips.
+The dream look is the viewer's default view. V switches it between strong, subtle and off (and
+from the heatmap, back to the dream look); R swaps to the realness heatmap and back; L, [ and ]
+place and size test lights, which show in the dream look and the heatmap but not with the dream
+off. H hides everything but the world (text, grid, axes, photo frames and overlays, floor
+overlay) for clean screenshots and clips.
 
 ## Tests
 
@@ -96,4 +99,6 @@ screenshots and clips.
   (100 of them around a light) at strengths 1, 0.5 and 2 (clamped to 1). Each color must match
   the reference to 5 decimal places, and over 50 splats per strength must be partly washed, so
   the soft middle of the fade is covered. The strength changes between reads of one compiled
-  shader. At strength 0 only the toon step remains.
+  shader, and no new shader program appears. At strength 0 only the toon step remains. Over 20
+  of the random colors must sit on a soft edge between two toon bands, where the step is
+  steepest.
