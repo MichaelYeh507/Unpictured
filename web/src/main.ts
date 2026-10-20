@@ -7,7 +7,9 @@ import {
 } from "@sparkjsdev/spark";
 import {
   DREAM_SETTINGS,
+  DREAM_SHAPE_SETTINGS,
   DREAM_STRENGTHS,
+  DRIFT_LOOP_PERIODS,
   type DreamStrength,
   isSplatDetail,
   isWorldName,
@@ -48,7 +50,10 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x202020);
+// Dark gray, or in the dream look the dream's paper, which shows through where splats dissolve.
+const plainBackground = new THREE.Color(0x202020);
+const paperBackground = new THREE.Color().setRGB(...DREAM_SETTINGS.paper, THREE.SRGBColorSpace);
+scene.background = plainBackground;
 scene.add(new SparkRenderer({ renderer }));
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.05, 500);
@@ -63,6 +68,8 @@ scene.add(helpers);
 // (x red, y green, z blue). A unit is a metre only when the world has metric data.
 helpers.add(new THREE.GridHelper(20, 20), new THREE.AxesHelper(1));
 let unitLabel = "m";
+// Set once a world loads: its dream look moves with time.
+let realnessViews: RealnessViews | undefined;
 
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -73,6 +80,7 @@ window.addEventListener("resize", () => {
 
 renderer.setAnimationLoop(() => {
   controls.update(camera);
+  realnessViews?.tick(performance.now() / 1000);
   const { x, y, z } = camera.position;
   positionLine.textContent = `x ${x.toFixed(2)}  y ${y.toFixed(2)}  z ${z.toFixed(2)}  ${unitLabel}`;
   renderer.render(scene, camera);
@@ -145,6 +153,7 @@ async function loadWorld(): Promise<void> {
   const loadCollider = colliderLoader(`/worlds/${name}/${colliderFile}`);
   const walkable = new WalkableFloorToggle(loadCollider, placement, photoCameras);
   const realness = new RealnessViews(splats, loadCollider, placement, photoCameras);
+  realnessViews = realness;
   const canShowRealness = colliderFile !== undefined && photoCameras.length > 0;
   if (canShowRealness) {
     void realness.start();
@@ -254,6 +263,7 @@ class RealnessViews {
   private readonly photoCameras: PhotoCamera[];
   private readonly lights = new RealnessLights();
   private readonly strength = dyno.dynoFloat(DREAM_STRENGTHS.strong);
+  private readonly seconds = dyno.dynoFloat(0);
   private dream: GsplatModifier | undefined;
   private heatmap: GsplatModifier | undefined;
   /** What the splats were last given: Spark's objectModifier cannot be read back. */
@@ -317,6 +327,15 @@ class RealnessViews {
     this.show(); // also applies the view when a failed start left none
   }
 
+  /** Moves the dream's drift on to this time, while the dream look is shown. */
+  tick(seconds: number): void {
+    if (this.applied !== undefined && this.applied === this.dream) {
+      // The drift repeats after this loop, so the uniform stays small and precise.
+      this.seconds.value = seconds % (DRIFT_LOOP_PERIODS * DREAM_SHAPE_SETTINGS.period);
+      this.splats.updateVersion();
+    }
+  }
+
   clearLights(): void {
     this.lights.set([], REALNESS_SETTINGS);
     this.splats.updateVersion();
@@ -360,12 +379,16 @@ class RealnessViews {
       const settings = REALNESS_SETTINGS;
       this.heatmap = realnessHeatmap(cameras, cameraHeight, settings, this.lights);
       this.dream = dreamLook(
-        cameras,
-        cameraHeight,
-        settings,
-        this.lights,
-        this.strength,
+        {
+          cameras,
+          cameraHeight,
+          realness: settings,
+          lights: this.lights,
+          strength: this.strength,
+          seconds: this.seconds,
+        },
         DREAM_SETTINGS,
+        DREAM_SHAPE_SETTINGS,
       );
       return true;
     } catch (error) {
@@ -382,6 +405,7 @@ class RealnessViews {
       this.applied = modifier;
       this.splats.objectModifier = modifier;
       this.splats.updateGenerator();
+      scene.background = modifier === this.dream ? paperBackground : plainBackground;
     }
     this.strength.value = DREAM_STRENGTHS[this.dreamStrength];
     this.splats.updateVersion();
@@ -412,8 +436,10 @@ class RealnessViews {
       return;
     }
     realnessLine.textContent =
-      `Dream look, ${this.dreamStrength}: soft bands of color everywhere, and the less real a ` +
-      `part is, the more it fades into the dream's pastel. V: strong, subtle or off. ${lights}`;
+      `Dream look, ${this.dreamStrength}: soft bands of color everywhere; the less real a part ` +
+      "is, the more it fades into the dream's pastel and swells, and far from the photo it " +
+      "drifts and dissolves (the floor at the photo spot's level holds still). V: strong, subtle " +
+      `or off. ${lights}`;
   }
 }
 
