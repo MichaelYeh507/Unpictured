@@ -438,7 +438,8 @@ class RealnessViews {
     realnessLine.textContent =
       `Dream look, ${this.dreamStrength}: soft bands of color everywhere; the less real a part ` +
       "is, the more it fades into the dream's pastel and swells, and far from the photo it " +
-      `drifts and dissolves (floors hold still). V: strong, subtle or off. ${lights}`;
+      "drifts and dissolves (the floor at the photo spot's level holds still). V: strong, subtle " +
+      `or off. ${lights}`;
   }
 }
 

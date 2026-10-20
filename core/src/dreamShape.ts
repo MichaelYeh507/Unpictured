@@ -1,8 +1,9 @@
 /**
  * How the dream changes each splat's shape (docs/DREAM_LOOK.md): the less real it is, the more it
- * swells, and far from the photo spot it also drifts and dissolves toward dust. Floors hold still,
- * because the player stands on the collider, which does not move. Points are in the raw splat
- * frame (y down, the photo spot at the origin); distances are in camera heights.
+ * swells, and far from the photo spot it also drifts and dissolves toward dust. The floor at the
+ * photo spot's level holds still, because the player stands on the collider, which does not move.
+ * Points are in the raw splat frame (y down, the photo spot at the origin); distances are in
+ * camera heights.
  */
 
 import type { Vec3 } from "./frames.ts";

@@ -5,9 +5,9 @@ brightness with livelier color, so the world reads as illustrated rather than ph
 toon step). Then, the less real a splat is, the more it takes on the dream's pastel palette and
 fades toward the paper (the wash). The less real a splat is, the more it also swells, so edges
 bleed into each other; far from the photo spot it drifts slowly and dissolves toward the paper
-behind the world (the shape). Floors hold still, because the player stands on the collider, which
-does not move. Realness comes from `docs/REALNESS.md`, so a memory light repaints the dream and
-calms it around it.
+behind the world (the shape). The floor at the photo spot's level holds still, because the player
+stands on the collider, which does not move. Realness comes from `docs/REALNESS.md`, so a memory
+light repaints the dream and calms it around it.
 
 This file is the contract for every implementation: the TypeScript reference
 (`core/src/dreamLook.ts` for color, `core/src/dreamShape.ts` for shape), the shader
@@ -97,12 +97,15 @@ opacity'  = opacity * mix(1, dustOpacity, dissolve)
   breathe as one wave; as a splat dissolves, `random` scatters it like dust. The axes turn at
   rates 1, 0.75 and 1.25, so the drift repeats every 4 periods (the viewer wraps its clock there,
   which keeps the shader's time small and precise).
-- **Floors hold still**: splats less than `floorHold` above the floor under the photo spot (or
-  below it) move at most `floorDrift`, under the collider's precision of about 5 cm, so feet meet
-  the floor that is drawn. On slopes and stairs away from the photo spot's floor height, floor
-  splats may drift a little more.
+- **The floor holds still**: splats less than `floorHold` above the floor under the photo spot
+  (or below it) move at most `floorDrift`, under the collider's precision of about 5 cm, so feet
+  meet the floor that is drawn. Only height tells floor from the rest: ground more than
+  `floorFree` above that level (about 40 cm at a 1.6 m camera height), such as a street rising in
+  the distance, stairs or a raised bank, drifts as much as walls do. Telling the floor apart
+  from the collider instead is left for later.
 - **Dissolve**: deep in the dream, splats shrink toward dust and thin out, and the paper
-  background shows through. Floors dissolve too, but they never move more than `floorDrift`.
+  background shows through. The held floor dissolves too, but never moves more than
+  `floorDrift`.
 - **Random numbers**: `first = pcg(index)`, `second = pcg(first)`, `third = pcg(second)`, each
   turned into a 32-bit float and divided by 2^32, where `pcg` is the PCG hash from Jarzynski and
   Olano, "Hash Functions for GPU Rendering" (2020), on unsigned 32-bit numbers:

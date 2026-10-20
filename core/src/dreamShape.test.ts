@@ -3,6 +3,7 @@ import {
   checkDreamShapeSettings,
   DREAM_SHAPE_SETTINGS,
   DRIFT_LOOP_PERIODS,
+  DRIFT_RATES,
   type DreamShapeSettings,
   dreamDepth,
   dreamShape,
@@ -148,7 +149,11 @@ test("the drift starts over after DRIFT_LOOP_PERIODS periods, and not before", (
   const loop = DRIFT_LOOP_PERIODS * WORKED.period;
   const at = (seconds: number) => dreamShape(splat, 21, 0.8, seconds, HEIGHT, WORKED).center;
   expectVec(at(3.3 + loop), at(3.3));
-  for (const periods of [1, 2, 3]) {
+  for (const rate of DRIFT_RATES) {
+    expect(Number.isInteger(rate * DRIFT_LOOP_PERIODS), `rate ${rate}`).toBe(true);
+  }
+  // No shorter whole number of periods brings it back.
+  for (let periods = 1; periods < DRIFT_LOOP_PERIODS; periods++) {
     const later = at(3.3 + periods * WORKED.period);
     expect(Math.hypot(...later.map((v, i) => v - (at(3.3)[i] ?? 0))), `${periods}`).toBeGreaterThan(
       1e-3,

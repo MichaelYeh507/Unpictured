@@ -191,6 +191,7 @@ test("the dream look swells, drifts and dissolves sample splats as the reference
       const label = `strength ${level}, ${seconds} s`;
       let deepening = 0;
       let dissolving = 0;
+      let mostDissolved = 0;
       let heldFloor = 0;
       for (const [i, center] of stored.centers.entries()) {
         const splat = {
@@ -215,6 +216,7 @@ test("the dream look swells, drifts and dissolves sample splats as the reference
         deepening += depth > 0.01 && depth < 0.99 ? 1 : 0;
         const dissolve = smoothstep(shape.dissolveFrom, 1, depth);
         dissolving += dissolve > 0.01 && dissolve < 0.99 ? 1 : 0;
+        mostDissolved = Math.max(mostDissolved, dissolve);
         if (floorFreedom(center, cameraHeight, shape) === 0 && depth > 0.5) {
           heldFloor += 1;
           const [dx, dy, dz] = shownCenter.map((value, axis) => value - (center[axis] ?? 0));
@@ -230,6 +232,8 @@ test("the dream look swells, drifts and dissolves sample splats as the reference
       if (level === 1) {
         expect(dissolving, label).toBeGreaterThan(30);
         expect(heldFloor, label).toBeGreaterThan(30);
+      } else {
+        expect(mostDissolved, label).toBe(0);
       }
     }
   }
