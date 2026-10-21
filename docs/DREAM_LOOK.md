@@ -3,7 +3,8 @@
 The dream look is how a world looks in the game. Every splat is drawn in soft bands of
 brightness with livelier color, so the world reads as illustrated rather than photographed (the
 toon step). Then, the less real a splat is, the more it takes on the dream's pastel palette and
-fades toward the paper (the wash). The less real a splat is, the more it also swells, so edges
+fades toward the paper (the wash). The palette turns from warm to cold and back once a minute,
+everywhere at once. The less real a splat is, the more it also swells, so edges
 bleed into each other; far from the photo spot it drifts slowly and dissolves toward the paper
 behind the world (the shape). The floor at the photo spot's level holds still, because the player
 stands on the collider, which does not move. Realness comes from `docs/REALNESS.md`, so a memory
@@ -13,8 +14,8 @@ This file is the contract for every implementation: the TypeScript reference
 (`core/src/dreamLook.ts` for color, `core/src/dreamShape.ts` for shape), the shader
 (`web/src/dreamShader.ts`), and a later Unreal Engine port.
 
-Version 2 adds the shape and the paper background. The edge of the world (pigment where the
-world runs out) comes later.
+Version 2 adds the shape and the paper background; version 3 the warm-cold palette cycle. The
+edge of the world (pigment where the world runs out) comes later.
 
 ## Inputs
 
@@ -27,7 +28,7 @@ world runs out) comes later.
   deepens as the meter rises.
 - **The camera height**: the photo spot's height above the floor below it, in raw units.
   Distances below are in camera heights, as in `docs/REALNESS.md`.
-- **The time** in seconds, for the drift.
+- **The time** in seconds, for the drift and the palette cycle.
 - **Settings**, below.
 
 ## Formula
@@ -55,6 +56,9 @@ The wash, by how dreamed the splat is:
 
 ```
 intensity = clamp((1 - realness) * strength, 0, 1)
+coldness  = (1 - cos(2 pi seconds / cycleSeconds)) / 2        0 warm, 1 cold, same for every splat
+pigment   = mix(warm.pigment, cold.pigment, coldness)
+paper     = mix(warm.paper, cold.paper, coldness)
 luma      = brightness of toon
 keep      = mix(1, saturation, intensity)                   share of the saturation kept
 muted     = mix(luma, toon, keep)                           each channel
@@ -63,12 +67,14 @@ tinted    = mix(muted, palette, tint * intensity)
 washed    = mix(tinted, paper, paperLift * intensity)
 ```
 
-At intensity 0 the wash changes nothing, so what the photos saw shows the toon colors. Off
-removes the whole effect, so the splats show exactly as Marble made them.
+At intensity 0 the wash changes nothing, so what the photos saw shows the toon colors at every
+point of the cycle. Off removes the whole effect, so the splats show exactly as Marble made them.
+The cycle starts warm, is coldest halfway, and eases in and out at both ends. The coldness is the
+same for every splat, so it is worked out once per frame, not in the shader.
 
 `bands` must be a whole number, at least 1 (otherwise the top level passes 1),
 `bandSoftness` above 0 and at most 0.5 (GLSL's smoothstep needs a real width), `vivid` at
-least 0, and every other setting and color from 0 to 1.
+least 0, `cycleSeconds` a finite number above 0, and every other setting and color from 0 to 1.
 
 ## Shape
 
@@ -132,13 +138,18 @@ swells. Every setting must be finite; `swell`, `period` and `waveLength` above 0
 | `saturation` | Share of the saturation kept at full intensity | 0.8 |
 | `tint` | How far a color moves toward the palette at full intensity | 0.6 |
 | `paperLift` | How far a color moves toward the paper at full intensity | 0.25 |
-| `paper` | The palette's light end (sRGB) | 1, 0.9, 0.96 |
-| `pigment` | The palette's dark end (sRGB) | 0.6, 0.3, 0.65 |
+| `warm.paper` | The light end at the warm end of the cycle (sRGB) | 1, 0.9, 0.78 |
+| `warm.pigment` | The dark end at the warm end (sRGB) | 0.7, 0.35, 0.4 |
+| `cold.paper` | The light end at the cold end (sRGB) | 0.9, 0.96, 1 |
+| `cold.pigment` | The dark end at the cold end (sRGB) | 0.15, 0.3, 0.7 |
+| `cycleSeconds` | Seconds from warm to cold and back | 60 |
 
 Chosen by eye on 2026-10-20 from look-development screenshots of `sunset-alley` and
 `village-road-draft`: the toon settings were the strongest version that kept the photo's view
-recognizable, and the palette ("cotton candy", pink to orchid) was picked from six. The brief
-plans a palette per level later.
+recognizable. The two palettes, peach and sky blue, were the clearest warm and cold of six
+compared that day, and the cycle (warm to cold by time, not by place, once a minute, only the wash
+and the paper) was chosen from animations of a whole cycle. The brief plans a palette per level
+later.
 
 The shape's settings (distances in camera heights; at a 1.6 m camera height, 0.0125 is 2 cm and
 0.15 is 24 cm):
@@ -171,8 +182,10 @@ place and size test lights, which show in the dream look and the heatmap but not
 off. H hides everything but the world (text, grid, axes, photo frames and overlays, floor
 overlay) for clean screenshots and clips.
 
-While the dream look is shown, the background is the dream's paper color, so dissolving splats
-fade into paper; off and the heatmap keep the dark gray background. The drift moves on every
+While the dream look is shown, the background is the dream's paper color, turning with the
+cycle, so dissolving splats fade into paper; off and the heatmap keep the dark gray background.
+Each frame the viewer works out the coldness from its clock, counted from when the dream look
+first showed (so a visit starts warm), and passes it to the shader. The drift moves on every
 frame, so every splat is recomputed every frame: on a laptop's integrated GPU (AMD Radeon 780M,
 1.92 million splats at 1536 x 1152) the median frame went from 20.5 ms still to 25.8 ms drifting,
 and recomputing without moving took 25.7 ms, so nearly all of the cost is the recomputing. The
@@ -183,14 +196,16 @@ heatmap and the dream off do not move.
 - The TypeScript reference has worked cases. For the toon step: grays snapping to their band, no
   jump at a band's start, hue kept and color made livelier, clipping at the ends. For the wash: no
   change at intensity 0, saturation, palette and paper lift on their own and together, brightness
-  kept. Bad settings are refused.
-- A browser test runs the shader in headless Chromium on 1,600 sample splats with random colors
-  (100 of them around a light) at strengths 1, 0.5 and 2 (clamped to 1). Each color must match
-  the reference to 5 decimal places, and over 50 splats per strength must be partly washed, so
-  the soft middle of the fade is covered. The strength changes between reads of one compiled
-  shader, and no new shader program appears. At strength 0 only the toon step remains. Over 20
-  of the random colors must sit on a soft edge between two toon bands, where the step is
-  steepest.
+  kept. For the cycle: coldness at 0, 10, 15, 30, 50 and 70 seconds of a 60-second cycle (10
+  seconds gives 0.25, which tells the easing from a straight line), the palette blended a quarter
+  of the way, and the wash using the blended pigment and paper. Bad settings are refused.
+- A browser test runs the shader in headless Chromium on 1,900 sample splats with random colors
+  (100 of them around a light) at strength and coldness 1 and 0, 0.5 and 0.3, 2 (clamped to 1)
+  and 1, and 1 and 0.75. Each color must match the reference to 5 decimal places, and over 50
+  splats each time must be partly washed, so the soft middle of the fade is covered. Strength
+  and coldness change between reads of one compiled shader, and no new shader program appears.
+  At strength 0 only the toon step remains. Over 20 of the random colors must sit on a soft edge
+  between two toon bands, where the step is steepest.
 - The shape's reference has worked cases from an independent Python calculation (a splat in the
   middle distance, one far away and fully dissolved, one far away on the floor), plus checks
   that floors hold, the drift stays within its reach and uses it, nothing changes at intensity 0,

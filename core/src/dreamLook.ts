@@ -1,7 +1,7 @@
 /**
- * The dream look (docs/DREAM_LOOK.md). Every splat is drawn in soft bands of brightness with
- * livelier color (the toon step); then, the less real it is, the more it takes on the dream's
- * palette and fades toward the paper (the wash). Colors are sRGB from 0 to 1, as splats store them.
+ * The dream look (docs/DREAM_LOOK.md): soft bands of brightness with livelier color (the toon
+ * step), then the less real a splat is, the more it takes on the dream's palette, which cycles
+ * from warm to cold, and fades toward the paper (the wash). Colors are sRGB from 0 to 1.
  */
 
 import type { Vec3 } from "./frames.ts";
@@ -22,14 +22,23 @@ export interface DreamSettings {
   tint: number;
   /** How far a splat's color moves toward the paper at full dream intensity. */
   paperLift: number;
-  /** The dream palette's light end. */
+  /** The palette at the warm end of the cycle... */
+  warm: DreamPalette;
+  /** ...and at the cold end. */
+  cold: DreamPalette;
+  /** Seconds from warm to cold and back. */
+  cycleSeconds: number;
+}
+
+export interface DreamPalette {
+  /** The light end, which is also the paper behind the world. */
   paper: Vec3;
-  /** The dream palette's dark end; brighter splats get more of the paper. */
+  /** The dark end; brighter splats get more of the paper. */
   pigment: Vec3;
 }
 
-/** Picked by eye from look-development screenshots (2026-10-20): soft toon bands and the
- * "cotton candy" palette, pink to orchid. */
+/** Picked by eye from look-development screenshots and animations (2026-10-20): soft toon
+ * bands, and a palette that turns from peach to sky blue and back once a minute. */
 export const DREAM_SETTINGS: DreamSettings = {
   bands: 4,
   bandSoftness: 0.04,
@@ -38,8 +47,9 @@ export const DREAM_SETTINGS: DreamSettings = {
   saturation: 0.8,
   tint: 0.6,
   paperLift: 0.25,
-  paper: [1, 0.9, 0.96],
-  pigment: [0.6, 0.3, 0.65],
+  warm: { paper: [1, 0.9, 0.78], pigment: [0.7, 0.35, 0.4] },
+  cold: { paper: [0.9, 0.96, 1], pigment: [0.15, 0.3, 0.7] },
+  cycleSeconds: 60,
 };
 
 /** The viewer's dream strengths. In the game, the wake meter will scale the strength instead. */
@@ -58,13 +68,36 @@ export function dreamIntensity(realness: number, strength: number): number {
   return Math.min(1, Math.max(0, (1 - realness) * strength));
 }
 
-/** A splat's color in the dream look: the toon step, then the wash at this intensity. */
+/** How far the palette has turned toward cold at this time: 0 (warm) at the start of each
+ * cycle, 1 (cold) halfway, easing in and out. */
+export function coldnessAt(seconds: number, settings: DreamSettings = DREAM_SETTINGS): number {
+  return (1 - Math.cos((2 * Math.PI * seconds) / settings.cycleSeconds)) / 2;
+}
+
+/** The palette this far from warm (0) to cold (1). */
+export function paletteAt(
+  coldness: number,
+  settings: DreamSettings = DREAM_SETTINGS,
+): DreamPalette {
+  const { warm, cold } = settings;
+  const channel = (from: Vec3, to: Vec3, i: 0 | 1 | 2) => mix(from[i], to[i], coldness);
+  const blend = (from: Vec3, to: Vec3): Vec3 => [
+    channel(from, to, 0),
+    channel(from, to, 1),
+    channel(from, to, 2),
+  ];
+  return { paper: blend(warm.paper, cold.paper), pigment: blend(warm.pigment, cold.pigment) };
+}
+
+/** A splat's color in the dream look: the toon step, then the wash at this intensity and
+ * coldness. */
 export function dreamColor(
   rgb: Vec3,
   intensity: number,
   settings: DreamSettings = DREAM_SETTINGS,
+  coldness = 0,
 ): Vec3 {
-  return washColor(toonColor(rgb, settings), intensity, settings);
+  return washColor(toonColor(rgb, settings), intensity, settings, coldness);
 }
 
 /** Brightness snapped to soft bands (the hue kept), then the color made livelier. */
@@ -87,15 +120,17 @@ export function washColor(
   rgb: Vec3,
   intensity: number,
   settings: DreamSettings = DREAM_SETTINGS,
+  coldness = 0,
 ): Vec3 {
+  const { paper, pigment } = paletteAt(coldness, settings);
   const brightness = luma(rgb);
   const keep = mix(1, settings.saturation, intensity);
   const tint = settings.tint * intensity;
   const lift = settings.paperLift * intensity;
   const channel = (i: 0 | 1 | 2) => {
     const muted = mix(brightness, rgb[i], keep);
-    const palette = mix(settings.pigment[i], settings.paper[i], brightness);
-    return mix(mix(muted, palette, tint), settings.paper[i], lift);
+    const palette = mix(pigment[i], paper[i], brightness);
+    return mix(mix(muted, palette, tint), paper[i], lift);
   };
   return [channel(0), channel(1), channel(2)];
 }
@@ -103,7 +138,7 @@ export function washColor(
 /** Settings the shader cannot use, or that would push colors out of range, are refused. */
 export function checkDreamSettings(settings: DreamSettings): void {
   const { bands, bandSoftness, shadowFloor, vivid } = settings;
-  const { saturation, tint, paperLift, paper, pigment } = settings;
+  const { saturation, tint, paperLift, warm, cold, cycleSeconds } = settings;
   if (!Number.isInteger(bands) || bands < 1) {
     throw new Error("dream look: bands must be a whole number, at least 1");
   }
@@ -114,9 +149,13 @@ export function checkDreamSettings(settings: DreamSettings): void {
   if (!(vivid >= 0) || !Number.isFinite(vivid)) {
     throw new Error("dream look: vivid must be a finite number, at least 0");
   }
-  const shares = [shadowFloor, saturation, tint, paperLift, ...paper, ...pigment];
+  if (!(cycleSeconds > 0) || !Number.isFinite(cycleSeconds)) {
+    throw new Error("dream look: cycleSeconds must be a finite number above 0");
+  }
+  const colors = [...warm.paper, ...warm.pigment, ...cold.paper, ...cold.pigment];
+  const shares = [shadowFloor, saturation, tint, paperLift, ...colors];
   if (!shares.every((value) => value >= 0 && value <= 1)) {
-    throw new Error("dream look: the other settings and both colors must be 0 to 1");
+    throw new Error("dream look: the other settings and every palette color must be 0 to 1");
   }
 }
 
