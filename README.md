@@ -4,11 +4,13 @@
 
 A first-person game that turns photos into dreams you can walk through. Early development.
 
-Worlds are generated from photos with the World Labs Marble API and rendered in the browser with three.js.
+Worlds are generated from photos with the World Labs Marble API. The game is being built in
+Unreal Engine 5 and C++ (`docs/UNREAL.md`); the earlier browser client stays as its reference.
 
 ## Layout
 
-- `web/`: the game client (Vite, TypeScript, three.js, Spark)
+- `unreal/`: the game, an Unreal Engine 5.7 C++ project (`docs/UNREAL.md`)
+- `web/`: the browser client, stopped at the dream look; the reference for the Unreal port
 - `core/`: engine-agnostic TypeScript (no three.js, Spark or DOM), such as coordinate frames
 - `pipeline/`: Python tools that generate and prepare world packages
 - `tests/`: language-neutral test vectors that every engine's code must pass
@@ -20,8 +22,8 @@ Requires Node 26 and [uv](https://docs.astral.sh/uv/).
 
 ```
 npm install
-npm run dev      # the game at http://localhost:5173
-npm run check    # every check that CI runs
+npm run dev      # the browser client at http://localhost:5173
+npm run check    # every check that CI runs (the Unreal project is built locally, see docs/UNREAL.md)
 ```
 
 Generated worlds, photos and API keys are never committed.
