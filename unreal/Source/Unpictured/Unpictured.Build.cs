@@ -6,6 +6,9 @@ public class Unpictured : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine" });
+
+		// Only the .cpp files use the input modules.
+		PrivateDependencyModuleNames.AddRange(new string[] { "InputCore", "EnhancedInput" });
 	}
 }

@@ -68,6 +68,10 @@ void AFreeFlyPawn::UnPossessed()
 		Subsystem->RemoveMappingContext(Mapping);
 	}
 	Super::UnPossessed();
+
+	// Key releases can no longer reach the pawn once its input component is gone.
+	bDragging = false;
+	StopFast();
 }
 
 void AFreeFlyPawn::BuildInput()
@@ -120,11 +124,11 @@ void AFreeFlyPawn::Move(const FInputActionValue& Value)
 {
 	const FVector Axis = Value.Get<FVector>();
 	const FRotator View = GetControlRotation();
-	const FRotator Level(0.0f, View.Yaw, 0.0f);
+	const FRotator Flat(0.0f, View.Yaw, 0.0f);
 
 	// Forward follows the view, pitch included, like the web viewer; sideways stays level.
 	AddMovementInput(View.Vector(), Axis.Y);
-	AddMovementInput(FRotationMatrix(Level).GetUnitAxis(EAxis::Y), Axis.X);
+	AddMovementInput(FRotationMatrix(Flat).GetUnitAxis(EAxis::Y), Axis.X);
 	AddMovementInput(FVector::UpVector, Axis.Z);
 }
 

@@ -2,10 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
-#include "InputCoreTypes.h"
 
 #include "FreeFlyPawn.generated.h"
 
+struct FKey;
 class UCameraComponent;
 class UEnhancedInputLocalPlayerSubsystem;
 class UFloatingPawnMovement;
