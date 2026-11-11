@@ -1,0 +1,20 @@
+# Build output and caches that Unreal regenerates
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+Build/
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+
+# IDE files, regenerated from the .uproject (see docs/UNREAL.md)
+.vs/
+.idea/
+.vsconfig
+*.sln
+*.VC.db
+*.VC.opendb
+*.suo
+*.opensdf
+*.sdf
+*.code-workspace
